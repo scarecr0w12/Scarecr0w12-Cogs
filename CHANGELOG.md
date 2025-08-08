@@ -7,27 +7,29 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ## [Unreleased]
 
 ### Added
+- (placeholder)
+### Changed
+- (placeholder)
+### Fixed
+- (placeholder)
 
-- **Modal-Based Configuration**: All web interface configuration commands now use Discord modals for improved security and user experience
-  - OAuth2 credentials entered through secure modal forms (no chat history exposure)
-  - Interactive URL configuration with validation and embedded help
-  - Server settings modal with host/port validation and security warnings
-  - Confirmation workflow for destructive reset operations
+## [1.2.0] - 2025-08-08
+
+### Added
+
+- Initial OAuth2 web dashboard pages: `/dashboard`, `/guild/{guild_id}`, `/profile` after Discord login
+- Guild configuration view (`/config/{guild_id}`) with admin-only access and masked provider key display
+- JSON API endpoints: `/api/guilds` (authorized guild list + permissions), `/api/status/{guild_id}` (status payload used by legacy page)
+- Session key auto-validation & regeneration (invalid/missing Fernet key repaired on startup)
 
 ### Changed
 
-- **BREAKING**: Web configuration commands changed from parameter-based to modal-based interfaces
-  - `[p]ai web config oauth` now opens interactive modal instead of requiring command parameters
-  - `[p]ai web config url` now opens URL configuration modal with validation
-  - `[p]ai web config server` now opens server settings modal
-  - `[p]ai web config reset` now requires modal confirmation workflow
-- Enhanced `[p]ai web config show` command with rich embed display, status indicators, and actionable next steps
-- Updated documentation to reflect modal-based configuration workflow
+- Re-enabled web route wiring for future expansion with guarded permission checks
+- Legacy `/status/{guild_id}` continues to function (tokens) while OAuth2 flow preferred
 
 ### Fixed
 
-- Fixed CommandAlreadyRegistered error caused by naming conflict between prefix and slash command groups
-- Changed slash commands from `/ai` to `/skynet` to resolve command registration conflict (prefix commands remain `[p]ai`)
+- Prevent crash on restart due to malformed `web_session_key` by validating and regenerating
 
 ## [1.1.0] - 2025-08-08
 

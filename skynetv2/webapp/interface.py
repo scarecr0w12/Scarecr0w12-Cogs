@@ -30,23 +30,32 @@ class WebInterface:  # Partial; only startup + shared existing methods moved gra
         self.session_key = new_key.encode()
         print("SkynetV2 Web: Auto-regenerated invalid/mismatched session key.")
 
+    async def _ensure_valid_session_key(self):
+        """Validate or regenerate the Fernet session key (robust)."""
+        attempts = 0
+        while attempts < 3:
+            key = await self.cog.config.web_session_key()
+            if isinstance(key, str):
+                key = key.strip()  # remove accidental whitespace/newlines
+            if not key or not isinstance(key, str):
+                await self._regenerate_session_key(); attempts += 1; continue
+            if len(key) != 44:
+                await self._regenerate_session_key(); attempts += 1; continue
+            try:
+                fernet.Fernet(key.encode())  # validate
+                self.session_key = key.encode()
+                if attempts > 0:
+                    print("SkynetV2 Web: Session key validated after regeneration attempts.")
+                return
+            except Exception:
+                await self._regenerate_session_key(); attempts += 1
+        # If we reach here, something is wrong with regeneration logic/environment
+        raise RuntimeError("SkynetV2 Web: Failed to establish a valid session key after retries.")
+
     async def initialize_config(self):
         config = self.cog.config
-        key = await config.web_session_key()
-        regenerate = False
-        if not key or not isinstance(key, str) or len(key) != 44:
-            regenerate = True
-        else:
-            try:
-                fernet.Fernet(key.encode())
-            except Exception:
-                regenerate = True
-        if regenerate:
-            new_key = fernet.Fernet.generate_key().decode()
-            await config.web_session_key.set(new_key)
-            key = new_key
-            print("SkynetV2 Web: Generated new session encryption key (previous was missing/invalid).")
-        self.session_key = key.encode()
+        # robust key load
+        await self._ensure_valid_session_key()
         oauth_config = await config.oauth2()
         self.client_id = oauth_config.get('client_id')
         self.client_secret = oauth_config.get('client_secret')
@@ -68,12 +77,13 @@ class WebInterface:  # Partial; only startup + shared existing methods moved gra
         # session storage with key auto-repair fallback
         try:
             setup(self.app, EncryptedCookieStorage(self.session_key, max_age=86400))
-        except Exception:
-            await self._regenerate_session_key()
+        except Exception as e:
+            print(f"SkynetV2 Web: Initial session storage setup failed ({e}); regenerating key.")
             try:
+                await self._regenerate_session_key()
                 setup(self.app, EncryptedCookieStorage(self.session_key, max_age=86400))
-            except Exception as e:
-                print(f"SkynetV2 Web: Failed to initialize session storage after regeneration: {e}")
+            except Exception as e2:
+                print(f"SkynetV2 Web: Failed to initialize session storage after regeneration: {e2}")
                 return
         # defer route registration to package init
         from . import auth, pages, api  # noqa

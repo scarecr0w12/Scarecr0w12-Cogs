@@ -433,10 +433,10 @@ class SkynetV2(ToolsMixin, MemoryMixin, StatsMixin, ListenerMixin, Orchestration
     # Slash commands
     # ----------------
 
-    ai = app_commands.Group(name="ai", description="AI assistant commands")
+    ai_slash = app_commands.Group(name="ai", description="AI assistant commands")
 
     # Slash governance group (moved here after ai group definition)
-    governance_group = app_commands.Group(name="governance", description="Governance controls", parent=ai)
+    governance_group = app_commands.Group(name="governance", description="Governance controls", parent=ai_slash)
 
     @governance_group.command(name="show", description="Show governance policy")
     @app_commands.checks.has_permissions(manage_guild=True)
@@ -518,7 +518,7 @@ class SkynetV2(ToolsMixin, MemoryMixin, StatsMixin, ListenerMixin, Orchestration
         await self._gov_update(interaction.guild, lambda g: g.setdefault("budget", {}).update({"per_user_daily_tokens": max(0, int(per_user_daily_tokens))}))
         await interaction.response.send_message("Budget updated.", ephemeral=True)
 
-    @ai.command(name="chat", description="Chat once with the configured model")
+    @ai_slash.command(name="chat", description="Chat once with the configured model")
     @app_commands.describe(message="Your message to the assistant", stream="Stream partial output (edits message)")
     async def slash_chat(self, interaction: discord.Interaction, message: str, stream: Optional[bool] = False):
         assert interaction.guild is not None
@@ -608,7 +608,7 @@ class SkynetV2(ToolsMixin, MemoryMixin, StatsMixin, ListenerMixin, Orchestration
         await self._memory_remember(interaction.guild, interaction.channel.id, message, text)
         await interaction.followup.send(text[:2000])
 
-    @ai.command(name="autosearch", description="Heuristic classify query -> mode + params (optionally execute search)")
+    @ai_slash.command(name="autosearch", description="Heuristic classify query -> mode + params (optionally execute search)")
     @app_commands.describe(query="Input to classify", execute="Execute search if mode=search")
     async def slash_autosearch(self, interaction: discord.Interaction, query: str, execute: Optional[bool] = False):
         assert interaction.guild is not None
@@ -622,7 +622,7 @@ class SkynetV2(ToolsMixin, MemoryMixin, StatsMixin, ListenerMixin, Orchestration
         plan = await self._tool_run_autosearch(guild=interaction.guild, query=query, user=interaction.user, execute=bool(execute))
         await interaction.response.send_message(box(plan[:1800], "yaml"))
 
-    mem_group = app_commands.Group(name="memory", description="Memory controls", parent=ai)
+    mem_group = app_commands.Group(name="memory", description="Memory controls", parent=ai_slash)
 
     @mem_group.command(name="show", description="Show recent memory entries for this channel")
     @app_commands.describe(limit="Number of pairs to show")
@@ -705,7 +705,7 @@ class SkynetV2(ToolsMixin, MemoryMixin, StatsMixin, ListenerMixin, Orchestration
                 prune["max_age_days"] = max(0, int(max_age_days))
         await interaction.response.send_message("Prune policy updated.", ephemeral=True)
 
-    @ai.command(name="stats", description="Show AI usage stats for this server")
+    @ai_slash.command(name="stats", description="Show AI usage stats for this server")
     @app_commands.describe(top="Top N users/channels to list")
     @app_commands.checks.has_permissions(manage_guild=True)
     async def slash_stats(self, interaction: discord.Interaction, top: Optional[int] = 5):
@@ -713,7 +713,7 @@ class SkynetV2(ToolsMixin, MemoryMixin, StatsMixin, ListenerMixin, Orchestration
         text = await self._build_stats_text(interaction.guild, top_n=int(top or 5))
         await interaction.response.send_message(box(text, "yaml"), ephemeral=True)
 
-    rate_group = app_commands.Group(name="rate", description="Rate limit controls", parent=ai)
+    rate_group = app_commands.Group(name="rate", description="Rate limit controls", parent=ai_slash)
 
     @rate_group.command(name="show", description="Show current rate limits")
     @app_commands.checks.has_permissions(manage_guild=True)
@@ -787,7 +787,7 @@ class SkynetV2(ToolsMixin, MemoryMixin, StatsMixin, ListenerMixin, Orchestration
         await self._tool_set_enabled(ctx.guild, name, False)
         await ctx.tick()
 
-    tools_group = app_commands.Group(name="tools", description="Tool management", parent=ai)
+    tools_group = app_commands.Group(name="tools", description="Tool management", parent=ai_slash)
 
     @tools_group.command(name="list", description="List available tools and status")
     @app_commands.checks.has_permissions(manage_guild=True)
@@ -857,7 +857,7 @@ class SkynetV2(ToolsMixin, MemoryMixin, StatsMixin, ListenerMixin, Orchestration
         await self.config.guild(ctx.guild).search.set({"provider": provider.lower()})
         await ctx.tick()
 
-    search_group = app_commands.Group(name="search", description="Search provider controls", parent=ai)
+    search_group = app_commands.Group(name="search", description="Search provider controls", parent=ai_slash)
 
     @search_group.command(name="show", description="Show search provider configuration")
     @app_commands.checks.has_permissions(manage_guild=True)
@@ -936,7 +936,7 @@ class SkynetV2(ToolsMixin, MemoryMixin, StatsMixin, ListenerMixin, Orchestration
         
         await ctx.send(box("\n".join(lines), "yaml"))
 
-    provider_group = app_commands.Group(name="provider", description="Provider management", parent=ai)
+    provider_group = app_commands.Group(name="provider", description="Provider management", parent=ai_slash)
     
     @provider_group.command(name="key_set", description="Set provider API key")
     @app_commands.describe(provider="Provider name", key="API key", global_scope="Set globally (default: guild only)")
@@ -1075,12 +1075,12 @@ class SkynetV2(ToolsMixin, MemoryMixin, StatsMixin, ListenerMixin, Orchestration
     # Register the slash group on cog load
     def cog_load(self):
         try:
-            self.bot.tree.add_command(self.ai)
+            self.bot.tree.add_command(self.ai_slash)
         except Exception:
             pass
 
     def cog_unload(self):
         try:
-            self.bot.tree.remove_command(self.ai.name)
+            self.bot.tree.remove_command(self.ai_slash.name)
         except Exception:
             pass

@@ -7,11 +7,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ## [Unreleased]
 
 ### Added
-- (placeholder)
+- Real SERP search provider (`search_serp.py`) replacing inline stub logic with external adapter and fallback.
+- Per-search-provider usage telemetry map (`usage.search_providers`) tracking invocation counts.
+- Firecrawl adapter scaffold (`firecrawl.py`) with search/scrape/crawl/deep_research async methods and internal IP blocking.
+- OAuth2 web API endpoints: `/api/guilds` (authorized guild list), `/api/status/{guild_id}` (guild status payload), `/api/health` (minimal health info).
+
 ### Changed
-- (placeholder)
+- Refactored `search.py` to dynamically import SERP provider and retain stub fallback.
+- Provider docs updated to reflect implemented Firecrawl adapter.
+- Web interface now validates & auto-regenerates invalid Fernet session keys (more robust startup) and exposes internal helper for future session key rotation.
+
 ### Fixed
-- (placeholder)
+- Improved user-facing error clarity for SERP failures (standard `[serp-error]` prefix).
 
 ## [1.3.0] - 2025-08-08
 
@@ -41,6 +48,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Fixed
 
 - Prevent crash on restart due to malformed `web_session_key` by validating and regenerating
+
+## [1.3.0] - 2025-08-08
+
+### Added
+- Prompt templates web module: CRUD pages (`/prompts`, `/prompts/new`, `/prompts/{name}`, `/prompts/{name}/generate`) with variable extraction and generation preview (global + guild scope)
+
+### Changed
+- Modular web interface now registers prompts module (non-fatal load)
+
+### Fixed
+- (none)
 
 ## [1.1.0] - 2025-08-08
 

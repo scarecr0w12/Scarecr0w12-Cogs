@@ -34,15 +34,30 @@ class WebInterface:
         self.client_id = None
         self.client_secret = None
         self.session_key = None
-        
+        self._owner_id = None  # cache bot owner id
+        self._start_time = time.time()
+    
     async def initialize_config(self):
-        """Initialize web interface configuration."""
-        # Get or generate session encryption key
+        """Initialize web interface configuration (validates session key)."""
         config = self.cog.config
         key = await config.web_session_key()
+        regenerate = False
         if not key:
+            regenerate = True
+        else:
+            try:
+                # Ensure it is valid Fernet key (44 char base64, decodes to 32 bytes)
+                fernet.Fernet(key.encode())
+            except Exception:
+                print("SkynetV2 Web: Stored session key invalid; regenerating.")
+                regenerate = True
+        if regenerate:
             key = fernet.Fernet.generate_key().decode()
-            await config.web_session_key.set(key)
+            try:
+                await config.web_session_key.set(key)
+            except Exception:
+                # Non-fatal; still attempt to use in-memory key
+                print("SkynetV2 Web: Failed to persist regenerated session key; using ephemeral.")
         self.session_key = key.encode()
         
         # Load OAuth2 configuration
@@ -120,6 +135,7 @@ class WebInterface:
         # API routes
         self.app.router.add_get('/api/guilds', self.api_guilds)
         self.app.router.add_get('/api/status/{guild_id}', self.api_guild_status)
+        self.app.router.add_get('/api/health', self.api_health)
         
         # Legacy token endpoint for backwards compatibility
         self.app.router.add_get('/status/{guild_id}', self.legacy_guild_status)
@@ -298,7 +314,7 @@ class WebInterface:
         return web.HTTPFound('/')
         
     async def get_user_permissions(self, user_info: Dict, user_guilds: List[Dict]) -> Dict[str, Any]:
-        """Determine user permissions based on Discord roles."""
+        """Determine user permissions based on Discord roles (cached owner id)."""
         user_id = int(user_info['id'])
         permissions = {
             'bot_owner': False,
@@ -306,12 +322,15 @@ class WebInterface:
             'guild_member': [],
             'guilds': []
         }
-        
-        # Check if bot owner
-        app_info = await self.cog.bot.application_info()
-        if user_id == app_info.owner.id:
+        # Cache owner id to avoid repeated API calls
+        if self._owner_id is None:
+            try:
+                app_info = await self.cog.bot.application_info()
+                self._owner_id = app_info.owner.id  # type: ignore[attr-defined]
+            except Exception:
+                self._owner_id = -1
+        if user_id == self._owner_id:
             permissions['bot_owner'] = True
-            # Bot owner has access to all bot guilds
             bot_guilds = [str(g.id) for g in self.cog.bot.guilds]
             permissions['guilds'] = bot_guilds
             permissions['guild_admin'] = bot_guilds
@@ -506,6 +525,16 @@ class WebInterface:
         
         return html
         
+    async def rotate_session_key(self):
+        """Rotate session key (call requires restart to invalidate old cookies)."""
+        new_key = fernet.Fernet.generate_key().decode()
+        try:
+            await self.cog.config.web_session_key.set(new_key)
+            self.session_key = new_key.encode()
+            print("SkynetV2 Web: Session key rotated. Restart web server to apply fully.")
+        except Exception as e:
+            print(f"SkynetV2 Web: Failed to rotate session key: {e}")
+    
     # Additional placeholder methods for completeness
     async def guild_dashboard(self, request: web.Request):
         """Guild-specific dashboard."""
@@ -516,21 +545,107 @@ class WebInterface:
         return web.Response(text="User profile - TODO", content_type='text/plain')
         
     async def guild_config(self, request: web.Request):
-        """Guild configuration page."""
-        return web.Response(text="Guild config - TODO", content_type='text/plain')
-        
+        """Guild configuration page (admin only)."""
+        session = await get_session(request)
+        user = session.get('user')
+        if not user:
+            return web.HTTPFound('/login')
+        guild_id = request.match_info.get('guild_id')
+        perms = user['permissions']
+        if guild_id not in perms.get('guild_admin', []):
+            return web.Response(text="Forbidden", status=403)
+        guild = self.cog.bot.get_guild(int(guild_id))
+        if not guild:
+            return web.Response(text="Guild not found", status=404)
+        html = f"<h1>Config: {guild.name}</h1><p>Configuration editing UI pending.</p>"
+        return web.Response(text=html, content_type='text/html')
+    
     async def update_guild_config(self, request: web.Request):
-        """Update guild configuration."""
-        return web.Response(text="Update config - TODO", content_type='text/plain')
-        
+        """Update guild configuration (not yet implemented)."""
+        return web.Response(text="Not implemented", status=501)
+    
+    # Helpers
+    def _mask_key(self, key: str | None) -> str:
+        if not key:
+            return "(not set)"
+        if len(key) < 8:
+            return key[:2] + "…"
+        return f"{key[:4]}…{key[-4:]}"
+    
+    def _guild_accessible(self, guild_id: str, permissions: Dict[str, Any]) -> bool:
+        return permissions.get('bot_owner') or guild_id in permissions.get('guilds', [])
+    
+    # API endpoints
     async def api_guilds(self, request: web.Request):
-        """API: List accessible guilds."""
-        return web.json_response({"guilds": []})
-        
+        """API: List accessible guilds with basic info."""
+        session = await get_session(request)
+        user = session.get('user')
+        if not user:
+            return web.json_response({'error': 'unauthorized'}, status=401)
+        perms = user['permissions']
+        data = []
+        for g in self.cog.bot.guilds:
+            sgid = str(g.id)
+            if not self._guild_accessible(sgid, perms):
+                continue
+            data.append({
+                'id': sgid,
+                'name': g.name,
+                'member_count': g.member_count,
+                'is_admin': sgid in perms.get('guild_admin', [])
+            })
+        return web.json_response({'guilds': data})
+    
     async def api_guild_status(self, request: web.Request):
-        """API: Guild status."""
-        return web.json_response({"status": "ok"})
-        
+        """API: Guild status details (basic telemetry + config presence)."""
+        session = await get_session(request)
+        user = session.get('user')
+        if not user:
+            return web.json_response({'error': 'unauthorized'}, status=401)
+        guild_id = request.match_info.get('guild_id')
+        perms = user['permissions']
+        if not guild_id or not self._guild_accessible(guild_id, perms):
+            return web.json_response({'error': 'forbidden'}, status=403)
+        guild = self.cog.bot.get_guild(int(guild_id))
+        if not guild:
+            return web.json_response({'error': 'not_found'}, status=404)
+        # Fetch minimal config data
+        providers_global = await self.cog.config.providers()
+        g_providers = await self.cog.config.guild(guild).providers()
+        model_cfg = await self.cog.config.guild(guild).model()
+        enabled_tools = await self.cog.config.guild(guild).tools()
+        usage = await self.cog.config.guild(guild).usage()
+        tools_usage = len((usage or {}).get('tools', {})) if usage else 0
+        provider_keys = {
+            'openai': self._mask_key(providers_global.get('openai', {}).get('api_key')),
+            'serp': self._mask_key(providers_global.get('serp', {}).get('api_key')),
+            'firecrawl': self._mask_key(providers_global.get('firecrawl', {}).get('api_key')),
+        }
+        guild_provider_overrides = [p for p, v in (g_providers or {}).items() if v.get('api_key')]
+        status = {
+            'id': guild_id,
+            'name': guild.name,
+            'member_count': guild.member_count,
+            'model': model_cfg or '(inherit)',
+            'providers_global': provider_keys,
+            'providers_overrides': guild_provider_overrides,
+            'tools_enabled_count': sum(1 for v in (enabled_tools or {}).get('enabled', {}).values() if v),
+            'tool_usage_kinds': tools_usage,
+        }
+        return web.json_response(status)
+    
+    async def api_health(self, request: web.Request):
+        """API: Minimal health/status endpoint (no secrets)."""
+        uptime = int(time.time() - self._start_time)
+        guild_count = len(self.cog.bot.guilds)
+        version = getattr(self.cog, '__version__', 'unknown')
+        return web.json_response({
+            'ok': True,
+            'uptime_s': uptime,
+            'guild_count': guild_count,
+            'version': version,
+        })
+    
     async def legacy_guild_status(self, request: web.Request):
         """Legacy token-based guild status (backwards compatibility)."""
         return web.Response(text="Legacy endpoint - use OAuth2 interface", status=410)

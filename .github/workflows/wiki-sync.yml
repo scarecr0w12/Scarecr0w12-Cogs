@@ -7,48 +7,36 @@ on:
       - 'README.md'
       - 'docs/**/*.md'
 
-# Ensure the GITHUB_TOKEN can push to the wiki
 permissions:
   contents: write
 
 jobs:
   sync:
-    if: ${{ github.event.repository.has_wiki }} # Skip if wiki disabled
+    if: ${{ github.event.repository.has_wiki }}
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
       - name: Checkout wiki
         uses: actions/checkout@v4
         with:
           repository: ${{ github.repository }}.wiki
           path: wiki
-          # token: ${{ secrets.DOCS_SYNC_PAT }}  # Uncomment & create secret if GITHUB_TOKEN insufficient
-
       - name: Prepare wiki content
         shell: bash
         run: |
           set -euo pipefail
           shopt -s nullglob
-
-          # Map README.md -> Home.md (unless you want a custom Home.md in docs/)
           cp README.md wiki/Home.md
-
-            # Copy docs/*.md (excluding a Home.md if present to avoid overwrite)
           for f in docs/*.md; do
             base="$(basename "$f")"
-            # Skip if it would override Home.md just created from README
             if [[ "${base,,}" == "home.md" ]]; then
               continue
             fi
             cp "$f" "wiki/$base"
           done
-
-          # Build index section
           docs_list=(docs/*.md)
           if (( ${#docs_list[@]} > 0 )); then
             {
@@ -58,43 +46,26 @@ jobs:
               for f in "${docs_list[@]}"; do
                 base="$(basename "$f")"
                 title="${base%.md}"
-                # Present a nicer title (replace - and _ with space)
                 pretty="${title//[-_]/ }"
-                # Skip Home if any
                 if [[ "${title,,}" == "home" ]]; then
                   continue
                 fi
-                # Wiki link format: [[Link Text|PageName]]
                 echo "- [[${pretty}|${title}]]"
               done
             } >> wiki/Home.md
           fi
-
-      - name: Debug (optional)
-        if: ${{ runner.debug == '1' }}
-        run: |
-          git -C wiki remote -v
-          echo "Listing wiki directory:"
-          ls -al wiki
-
       - name: Commit & push wiki
         run: |
           set -e
           cd wiki
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
-          # Show status for debugging
-          git status --short || true
-
           git add .
           if git diff --cached --quiet; then
             echo "No wiki changes"
             exit 0
           fi
-
           git commit -m "docs: sync from main repo (${GITHUB_SHA::7})"
-          # Retry push (handles transient failures)
           for i in 1 2 3; do
             if git push; then
               echo "Wiki updated."

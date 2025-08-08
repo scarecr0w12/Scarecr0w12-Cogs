@@ -1115,7 +1115,11 @@ class SkynetV2(ToolsMixin, MemoryMixin, StatsMixin, ListenerMixin, Orchestration
 
     @ai_web.group(name="token")
     async def ai_web_token(self, ctx: commands.Context):
-        """Manage web interface authentication tokens."""
+        """Manage legacy web interface authentication tokens (deprecated).
+        
+        OAuth2 web login has replaced token auth. These commands are retained for
+        backwards compatibility and will be removed in a future release.
+        """
         if not ctx.invoked_subcommand:
             await ctx.send_help()
 
@@ -1821,17 +1825,6 @@ The web interface is currently accessible only from localhost for security reaso
                 await ctx.send("❌ Web interface is not initialized.")
         except Exception as e:
             await ctx.send(f"❌ Failed to restart web interface: {e}")
-
-    # Legacy token commands (kept for backwards compatibility)
-    @ai_web.group(name="token")
-    async def ai_web_token_legacy(self, ctx: commands.Context):
-        """Legacy token management (deprecated - use OAuth2 login)."""
-        if not ctx.invoked_subcommand:
-            await ctx.send("⚠️ **Token authentication is deprecated.**\n"
-                           "Please use the new OAuth2 web interface:\n"
-                           "1. Configure OAuth2: `[p]ai web config oauth`\n"
-                           "2. Set public URL: `[p]ai web config url`\n"
-                           "3. Access via: your configured domain")
 
     # ----------------
     # Cog Lifecycle

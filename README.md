@@ -1,5 +1,7 @@
 # Scarecr0w12-Cogs
 
+> Documentation now lives in the GitHub Wiki. The `docs/` folder is kept as a source snapshot and will auto-sync to the Wiki. Visit: [Project Wiki](https://github.com/Scarecr0w12/Scarecr0w12-Cogs/wiki)
+
 A collection of AI-powered cogs for Red-DiscordBot.
 
 ## Installation
@@ -45,6 +47,7 @@ AI assistant cog focused on usability, governance, and extensibility.
 3. Chat: `/skynet chat "hello"` or `[p]ai chat "hello"`
 
 **Documentation:**
+- Full Wiki: [Project Wiki](https://github.com/Scarecr0w12/Scarecr0w12-Cogs/wiki)
 - [Commands](docs/commands.md)
 - [Configuration](docs/configuration.md)
 - [Architecture](docs/architecture.md)

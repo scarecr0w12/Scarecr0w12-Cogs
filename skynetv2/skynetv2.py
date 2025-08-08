@@ -434,9 +434,14 @@ class SkynetV2(ToolsMixin, MemoryMixin, StatsMixin, ListenerMixin, Orchestration
     # ----------------
 
     ai_slash = app_commands.Group(name="skynet", description="AI assistant commands")
-
-    # Slash governance group (moved here after ai group definition)
+    
+    # All slash command groups defined at class level
     governance_group = app_commands.Group(name="governance", description="Governance controls", parent=ai_slash)
+    mem_group = app_commands.Group(name="memory", description="Memory controls", parent=ai_slash)
+    rate_group = app_commands.Group(name="rate", description="Rate limit controls", parent=ai_slash)
+    tools_group = app_commands.Group(name="tools", description="Tool management", parent=ai_slash)
+    search_group = app_commands.Group(name="search", description="Search provider controls", parent=ai_slash)
+    provider_group = app_commands.Group(name="provider", description="Provider management", parent=ai_slash)
 
     @governance_group.command(name="show", description="Show governance policy")
     @app_commands.checks.has_permissions(manage_guild=True)
@@ -622,7 +627,7 @@ class SkynetV2(ToolsMixin, MemoryMixin, StatsMixin, ListenerMixin, Orchestration
         plan = await self._tool_run_autosearch(guild=interaction.guild, query=query, user=interaction.user, execute=bool(execute))
         await interaction.response.send_message(box(plan[:1800], "yaml"))
 
-    mem_group = app_commands.Group(name="memory", description="Memory controls", parent=ai_slash)
+    # Memory management slash commands
 
     @mem_group.command(name="show", description="Show recent memory entries for this channel")
     @app_commands.describe(limit="Number of pairs to show")
@@ -713,7 +718,7 @@ class SkynetV2(ToolsMixin, MemoryMixin, StatsMixin, ListenerMixin, Orchestration
         text = await self._build_stats_text(interaction.guild, top_n=int(top or 5))
         await interaction.response.send_message(box(text, "yaml"), ephemeral=True)
 
-    rate_group = app_commands.Group(name="rate", description="Rate limit controls", parent=ai_slash)
+    # Rate limit slash commands
 
     @rate_group.command(name="show", description="Show current rate limits")
     @app_commands.checks.has_permissions(manage_guild=True)
@@ -787,7 +792,7 @@ class SkynetV2(ToolsMixin, MemoryMixin, StatsMixin, ListenerMixin, Orchestration
         await self._tool_set_enabled(ctx.guild, name, False)
         await ctx.tick()
 
-    tools_group = app_commands.Group(name="tools", description="Tool management", parent=ai_slash)
+    # Tools management slash commands
 
     @tools_group.command(name="list", description="List available tools and status")
     @app_commands.checks.has_permissions(manage_guild=True)
@@ -857,7 +862,7 @@ class SkynetV2(ToolsMixin, MemoryMixin, StatsMixin, ListenerMixin, Orchestration
         await self.config.guild(ctx.guild).search.set({"provider": provider.lower()})
         await ctx.tick()
 
-    search_group = app_commands.Group(name="search", description="Search provider controls", parent=ai_slash)
+    # Search provider slash commands
 
     @search_group.command(name="show", description="Show search provider configuration")
     @app_commands.checks.has_permissions(manage_guild=True)
@@ -936,7 +941,7 @@ class SkynetV2(ToolsMixin, MemoryMixin, StatsMixin, ListenerMixin, Orchestration
         
         await ctx.send(box("\n".join(lines), "yaml"))
 
-    provider_group = app_commands.Group(name="provider", description="Provider management", parent=ai_slash)
+    # Provider management slash commands
     
     @provider_group.command(name="key_set", description="Set provider API key")
     @app_commands.describe(provider="Provider name", key="API key", global_scope="Set globally (default: guild only)")
@@ -1074,12 +1079,23 @@ class SkynetV2(ToolsMixin, MemoryMixin, StatsMixin, ListenerMixin, Orchestration
 
     # Register the slash group on cog load
     def cog_load(self):
+        """Called when the cog is loaded."""
         try:
-            self.bot.tree.add_command(self.ai_slash)
+            # Remove any existing command with the same name first
+            self.bot.tree.remove_command(self.ai_slash.name)
         except Exception:
             pass
+        
+        try:
+            self.bot.tree.add_command(self.ai_slash)
+        except Exception as e:
+            # Log the error for debugging
+            import logging
+            logger = logging.getLogger("red.skynetv2")
+            logger.error(f"Failed to add slash command group: {e}")
 
     def cog_unload(self):
+        """Called when the cog is unloaded."""
         try:
             self.bot.tree.remove_command(self.ai_slash.name)
         except Exception:

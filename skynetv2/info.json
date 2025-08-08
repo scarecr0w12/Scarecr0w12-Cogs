@@ -3,7 +3,7 @@
   "short": "AI assistant with chat and tools",
   "description": "LLM-powered assistant for Red-DiscordBot with multi-provider support.",
   "end_user_data_statement": "This cog stores minimal configuration and optional conversation context. It does not share data with third parties beyond configured AI providers.",
-  "install_msg": "Thanks for installing SkynetV2! Use [p]ai to get started.",
+  "install_msg": "Thanks for installing SkynetV2! Use [p]skynet to get started.",
   "author": ["Scarecr0w12"],
   "required_cogs": {},
   "requirements": [

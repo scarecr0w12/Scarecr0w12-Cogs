@@ -36,6 +36,7 @@ AI assistant cog focused on usability, governance, and extensibility.
 - Modular mixins (memory, tools, stats, listener) for maintainability
 - Agent tool orchestration with JSON schemas for AI automation
 - Heuristic autosearch tool (classifies query -> plan; executes search + real scrape/crawl/deep research via Firecrawl when API key configured, placeholder otherwise; optional autoscrape single result)
+- **Web Interface (OAuth2)**: Discord OAuth2 authentication with role-based permissions for guild management, configuration, and monitoring. Supports custom domains with reverse proxy SSL termination.
 
 **Quick Start:**
 1. Set a key: `[p]ai provider key set openai <KEY> --global`
@@ -46,6 +47,7 @@ AI assistant cog focused on usability, governance, and extensibility.
 - [Commands](docs/commands.md)
 - [Configuration](docs/configuration.md)
 - [Architecture](docs/architecture.md)
+- [Web Interface Setup](docs/web-oauth-setup.md)
 
 ## Support
 

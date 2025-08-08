@@ -8,12 +8,42 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 
+- **Modal-Based Configuration**: All web interface configuration commands now use Discord modals for improved security and user experience
+  - OAuth2 credentials entered through secure modal forms (no chat history exposure)
+  - Interactive URL configuration with validation and embedded help
+  - Server settings modal with host/port validation and security warnings
+  - Confirmation workflow for destructive reset operations
+
 ### Changed
+
+- **BREAKING**: Web configuration commands changed from parameter-based to modal-based interfaces
+  - `[p]ai web config oauth` now opens interactive modal instead of requiring command parameters
+  - `[p]ai web config url` now opens URL configuration modal with validation
+  - `[p]ai web config server` now opens server settings modal
+  - `[p]ai web config reset` now requires modal confirmation workflow
+- Enhanced `[p]ai web config show` command with rich embed display, status indicators, and actionable next steps
+- Updated documentation to reflect modal-based configuration workflow
 
 ### Fixed
 
 - Fixed CommandAlreadyRegistered error caused by naming conflict between prefix and slash command groups
 - Changed slash commands from `/ai` to `/skynet` to resolve command registration conflict (prefix commands remain `[p]ai`)
+
+## [1.1.0] - 2025-08-08
+
+### Added
+
+- Modal-based web configuration workflow (OAuth2, URL, server settings, reset confirmation)
+- Rich status dashboard for web config show command
+
+### Changed
+
+- Breaking: Replaced parameter-based web config commands with modal interactions
+- Documentation updated (commands, setup guide, configuration)
+
+### Fixed
+
+- Improved validation and prevented sensitive credential exposure in chat history
 
 ## [1.0.0] - 2025-08-08
 

@@ -13,5 +13,6 @@
   "tags": ["skynet", "ai", "assistant", "llm"],
   "min_bot_version": "3.5.0",
   "min_python_version": [3, 10, 0],
-  "hidden": false
+  "hidden": false,
+  "version": "1.1.0"
 }

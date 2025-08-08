@@ -80,6 +80,93 @@ Listening enable/disable and mode commands will be surfaced in future updates; i
 - `autosearch` executes search + real scrape/crawl/deep_research when Firecrawl API key is configured (placeholder execution otherwise); enable autoscrape_single to auto-scrape a lone result.
 - Memory pruning: enforced on write using configured channel limit and guild prune policy (max_items, max_age_days). Export limited to last 50 messages per channel segment.
 
+## Web Interface
+
+Optional web interface for guild status and configuration viewing.
+
+### `[p]ai web`
+
+Web interface management commands (requires Manage Guild permission).
+
+#### `[p]ai web token generate [hours]`
+
+Generate a new web access token.
+
+- **hours**: Token expiry time (1-168 hours, default: 24)
+- Token sent via DM with access URL
+- Keep URL private - provides access to guild statistics
+
+#### `[p]ai web token list`
+
+List all active web tokens for the current guild.
+
+- Shows token prefix, creator, creation date, and expiry
+- Use prefixes to identify tokens for revocation
+
+#### `[p]ai web token revoke <prefix>`
+
+Revoke a web token by its prefix.
+
+- **prefix**: First few characters of the token to revoke
+- Token becomes immediately invalid
+
+#### `[p]ai web token cleanup`
+
+Remove all expired web tokens from the current guild.
+
+- Cleans up storage by removing old tokens
+- No effect on active tokens
+
+#### `[p]ai web status`
+
+Show web interface status and configuration.
+
+- Displays server port and running status
+- Shows active token count
+
+## Web Interface
+
+SkynetV2 includes a Discord OAuth2 web interface with role-based permissions.
+
+### OAuth2 Configuration (Bot Owner Only)
+- `[p]ai web config oauth` - **Configure Discord OAuth2 credentials via secure modal**
+  - Interactive modal form for client ID and client secret
+  - Embedded setup instructions and validation
+  - Secure credential entry (no chat history)
+
+- `[p]ai web config url` - **Set public domain via modal**
+  - Interactive form with URL validation
+  - Support for custom domains and Cloudflare setup
+  - Automatic redirect URI guidance
+
+- `[p]ai web config server` - **Configure server host/port via modal**
+  - Interactive form with validation (default: localhost:8080)
+  - Security warnings for external binding (0.0.0.0)
+  - Port range validation (1024-65535)
+
+- `[p]ai web config show` - **Display comprehensive configuration status**
+  - Visual status dashboard with color-coded indicators
+  - Configuration completeness assessment
+  - Next steps and quick action links
+  - Setup help and troubleshooting guides
+
+- `[p]ai web config reset` - **Reset configuration with confirmation workflow**
+  - Interactive confirmation modal requiring "CONFIRM" text
+  - Safe destructive action protection
+  - Clear explanation of what will be reset
+
+### Server Management
+- `[p]ai web restart` - Restart web interface server (bot owner only)
+- `[p]ai web status` - Show web interface status
+
+### Legacy Token System (Deprecated)
+- `[p]ai web token generate [hours]` - Generate legacy access token (24h default)
+- `[p]ai web token list` - List active tokens for guild
+- `[p]ai web token revoke <prefix>` - Revoke token by prefix
+- `[p]ai web token cleanup` - Remove expired tokens
+
+**Note**: OAuth2 authentication is now the preferred method with modal-based configuration for improved security and user experience. All sensitive credentials are entered through Discord modals to prevent exposure in chat history. See [Web OAuth Setup Guide](web-oauth-setup.md) for configuration instructions.
+
 ## Orchestration Commands
 
 Agent tool orchestration for AI automation and structured tool calls.

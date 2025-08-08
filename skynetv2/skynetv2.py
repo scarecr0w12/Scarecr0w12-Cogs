@@ -20,6 +20,7 @@ from .stats import StatsMixin
 from .listener import ListenerMixin
 from .orchestration import OrchestrationMixin
 from .error_handler import ErrorHandler
+from .web_oauth import WebInterface
 
 
 class SkynetV2(ToolsMixin, MemoryMixin, StatsMixin, ListenerMixin, OrchestrationMixin, commands.Cog):
@@ -37,6 +38,8 @@ class SkynetV2(ToolsMixin, MemoryMixin, StatsMixin, ListenerMixin, Orchestration
         self._init_tool_registry()
         # Initialize orchestration system
         self._init_orchestration()
+        # Initialize web interface
+        self.web = WebInterface(self)
 
     # ----------------
     # Provider resolution & models
@@ -1098,6 +1101,756 @@ class SkynetV2(ToolsMixin, MemoryMixin, StatsMixin, ListenerMixin, Orchestration
     def _mask_key(self, key: str) -> str:
         """Mask sensitive API keys for display."""
         return self.error_handler.redact_secrets(key)
+
+    # ----------------
+    # Web Interface Commands
+    # ----------------
+
+    @ai_group.group(name="web")
+    @checks.admin_or_permissions(manage_guild=True)
+    async def ai_web(self, ctx: commands.Context):
+        """Web interface management commands."""
+        if not ctx.invoked_subcommand:
+            await ctx.send_help()
+
+    @ai_web.group(name="token")
+    async def ai_web_token(self, ctx: commands.Context):
+        """Manage web interface authentication tokens."""
+        if not ctx.invoked_subcommand:
+            await ctx.send_help()
+
+    @ai_web_token.command(name="generate")
+    async def ai_web_token_generate(self, ctx: commands.Context, hours: Optional[int] = 24):
+        """Generate a new web access token. Default expiry: 24 hours."""
+        if hours is None:
+            hours = 24
+            
+        if not 1 <= hours <= 168:  # Max 1 week
+            await ctx.send("Token expiry must be between 1 and 168 hours (1 week).")
+            return
+
+        import secrets
+        token = secrets.token_urlsafe(32)
+        expires = time.time() + (hours * 3600)
+
+        async with self.config.guild(ctx.guild).web_tokens() as tokens:
+            tokens[token] = {
+                'created_by': ctx.author.id,
+                'created_at': time.time(),
+                'expires': expires
+            }
+
+        port = getattr(self.web, 'port', 8080)
+        url = f"http://localhost:{port}/status/{ctx.guild.id}?token={token}"
+        
+        await ctx.author.send(f"""**SkynetV2 Web Access Token Generated**
+
+🔗 **URL**: {url}
+🕒 **Expires**: {time.strftime('%Y-%m-%d %H:%M:%S UTC', time.gmtime(expires))}
+🛡️ **Security**: This token grants read-only access to your guild's SkynetV2 status and configuration.
+
+⚠️ **Keep this URL private!** Anyone with this URL can view your guild's AI usage statistics and configuration.
+
+The web interface is currently accessible only from localhost for security reasons.""")
+        
+        await ctx.tick()
+
+    @ai_web_token.command(name="list")
+    async def ai_web_token_list(self, ctx: commands.Context):
+        """List active web tokens for this guild."""
+        tokens = await self.config.guild(ctx.guild).web_tokens()
+        
+        if not tokens:
+            await ctx.send("No active web tokens for this guild.")
+            return
+            
+        lines = []
+        now = time.time()
+        
+        for token, data in tokens.items():
+            created_by = ctx.guild.get_member(data.get('created_by', 0))
+            created_by_name = created_by.display_name if created_by else "Unknown"
+            
+            expires = data.get('expires', 0)
+            if expires > now:
+                expires_str = time.strftime('%Y-%m-%d %H:%M UTC', time.gmtime(expires))
+                lines.append(f"• Token {token[:8]}*** - Created by {created_by_name} - Expires: {expires_str}")
+            else:
+                lines.append(f"• Token {token[:8]}*** - EXPIRED")
+        
+        if lines:
+            await ctx.send(box("\n".join(lines), "yaml"))
+        else:
+            await ctx.send("No active tokens found.")
+
+    @ai_web_token.command(name="revoke")
+    async def ai_web_token_revoke(self, ctx: commands.Context, token_prefix: str):
+        """Revoke a web token by its prefix (first 8 characters)."""
+        async with self.config.guild(ctx.guild).web_tokens() as tokens:
+            found_token = None
+            for token in tokens:
+                if token.startswith(token_prefix):
+                    found_token = token
+                    break
+                    
+            if found_token:
+                del tokens[found_token]
+                await ctx.send(f"Revoked token {token_prefix}***")
+            else:
+                await ctx.send(f"No token found with prefix {token_prefix}")
+
+    @ai_web_token.command(name="cleanup")
+    async def ai_web_token_cleanup(self, ctx: commands.Context):
+        """Remove all expired tokens."""
+        async with self.config.guild(ctx.guild).web_tokens() as tokens:
+            now = time.time()
+            expired_tokens = [
+                token for token, data in tokens.items() 
+                if data.get('expires', 0) <= now
+            ]
+            
+            for token in expired_tokens:
+                del tokens[token]
+                
+        if expired_tokens:
+            await ctx.send(f"Cleaned up {len(expired_tokens)} expired token(s).")
+        else:
+            await ctx.send("No expired tokens found.")
+
+    @ai_web.command(name="status")
+    async def ai_web_status(self, ctx: commands.Context):
+        """Show web interface status."""
+        if self.web and self.web.app:
+            port = getattr(self.web, 'port', 8080)
+            await ctx.send(f"Web interface is running on http://localhost:{port}")
+        else:
+            await ctx.send("Web interface is not running.")
+
+    @ai_web.group(name="config")
+    @checks.is_owner()
+    async def ai_web_config(self, ctx: commands.Context):
+        """Configure OAuth2 web interface (bot owner only)."""
+        if not ctx.invoked_subcommand:
+            await ctx.send_help()
+
+    @ai_web_config.command(name="oauth")
+    async def ai_web_config_oauth(self, ctx: commands.Context):
+        """Set Discord OAuth2 application credentials via modal.
+        
+        Create a Discord application at https://discord.com/developers/applications
+        Set the redirect URI to: your_domain/callback
+        """
+        # Create modal for OAuth2 configuration
+        class OAuth2ConfigModal(discord.ui.Modal):
+            def __init__(self):
+                super().__init__(title="Discord OAuth2 Configuration", timeout=300.0)
+                
+            client_id = discord.ui.TextInput(
+                label="Discord Client ID",
+                placeholder="Your Discord application's Client ID",
+                min_length=10,
+                max_length=25,
+                required=True
+            )
+            
+            client_secret = discord.ui.TextInput(
+                label="Discord Client Secret", 
+                placeholder="Your Discord application's Client Secret",
+                min_length=10,
+                max_length=50,
+                required=True
+            )
+            
+            async def on_submit(self, interaction: discord.Interaction):
+                # Validate inputs
+                if len(self.client_id.value) < 10 or len(self.client_secret.value) < 10:
+                    await interaction.response.send_message(
+                        "❌ Invalid client ID or secret. Please check your Discord application settings.",
+                        ephemeral=True
+                    )
+                    return
+                    
+                # Get the cog instance
+                cog = interaction.client.get_cog("SkynetV2")
+                if not cog:
+                    await interaction.response.send_message(
+                        "❌ Could not access cog configuration.",
+                        ephemeral=True
+                    )
+                    return
+                    
+                # Save configuration
+                await cog.config.oauth2.set({
+                    "client_id": self.client_id.value.strip(),
+                    "client_secret": self.client_secret.value.strip()
+                })
+                
+                await interaction.response.send_message(
+                    "✅ OAuth2 credentials configured successfully!\n"
+                    f"Next step: Set your public URL with `[p]ai web config url`",
+                    ephemeral=True
+                )
+            
+            async def on_error(self, interaction: discord.Interaction, error: Exception):
+                await interaction.response.send_message(
+                    f"❌ An error occurred: {error}",
+                    ephemeral=True
+                )
+        
+        # Create view with modal
+        class OAuth2ConfigView(discord.ui.View):
+            def __init__(self):
+                super().__init__(timeout=60.0)
+                
+            @discord.ui.button(label="Configure OAuth2", style=discord.ButtonStyle.primary, emoji="⚙️")
+            async def configure_oauth2(self, interaction: discord.Interaction, button: discord.ui.Button):
+                modal = OAuth2ConfigModal()
+                await interaction.response.send_modal(modal)
+                
+        embed = discord.Embed(
+            title="🔐 Discord OAuth2 Configuration",
+            description="Click the button below to configure your Discord OAuth2 application credentials.",
+            color=0x5865F2
+        )
+        embed.add_field(
+            name="📋 Setup Instructions",
+            value="1. Go to https://discord.com/developers/applications\n"
+                  "2. Create a new application or select existing one\n"
+                  "3. Go to OAuth2 section\n"
+                  "4. Copy Client ID and Client Secret\n"
+                  "5. Add redirect URI: `your_domain/callback`",
+            inline=False
+        )
+        embed.add_field(
+            name="🔒 Security Note", 
+            value="Your credentials are encrypted and stored securely.",
+            inline=False
+        )
+        
+        view = OAuth2ConfigView()
+        await ctx.send(embed=embed, view=view)
+        
+    @ai_web_config.command(name="url")  
+    async def ai_web_config_url(self, ctx: commands.Context):
+        """Set the public URL for the web interface via modal.
+        
+        Examples:
+        - https://mybot.example.com
+        - https://skynet.mydomain.org
+        
+        This URL will be used for OAuth2 redirect URIs.
+        """
+        # Create modal for URL configuration
+        class URLConfigModal(discord.ui.Modal):
+            def __init__(self):
+                super().__init__(title="Web Interface Public URL", timeout=300.0)
+                
+            public_url = discord.ui.TextInput(
+                label="Public URL",
+                placeholder="https://yourdomain.com (no trailing slash)",
+                min_length=10,
+                max_length=200,
+                required=True
+            )
+            
+            async def on_submit(self, interaction: discord.Interaction):
+                url = self.public_url.value.strip()
+                
+                # Validate URL
+                if not url.startswith(('http://', 'https://')):
+                    await interaction.response.send_message(
+                        "❌ URL must start with http:// or https://",
+                        ephemeral=True
+                    )
+                    return
+                    
+                # Remove trailing slash
+                url = url.rstrip('/')
+                
+                # Get the cog instance
+                cog = interaction.client.get_cog("SkynetV2")
+                if not cog:
+                    await interaction.response.send_message(
+                        "❌ Could not access cog configuration.",
+                        ephemeral=True
+                    )
+                    return
+                    
+                # Save configuration
+                await cog.config.web_public_url.set(url)
+                
+                await interaction.response.send_message(
+                    f"✅ Public URL set to: `{url}`\n\n"
+                    f"**Important:** Make sure to set your Discord OAuth2 redirect URI to:\n"
+                    f"`{url}/callback`",
+                    ephemeral=True
+                )
+            
+            async def on_error(self, interaction: discord.Interaction, error: Exception):
+                await interaction.response.send_message(
+                    f"❌ An error occurred: {error}",
+                    ephemeral=True
+                )
+        
+        # Create view with modal
+        class URLConfigView(discord.ui.View):
+            def __init__(self):
+                super().__init__(timeout=60.0)
+                
+            @discord.ui.button(label="Set Public URL", style=discord.ButtonStyle.primary, emoji="🌐")
+            async def configure_url(self, interaction: discord.Interaction, button: discord.ui.Button):
+                modal = URLConfigModal()
+                await interaction.response.send_modal(modal)
+                
+        # Get current URL for display
+        current_url = await self.config.web_public_url() or "Not set"
+        
+        embed = discord.Embed(
+            title="🌐 Web Interface Public URL",
+            description="Set the public URL where your web interface will be accessible.",
+            color=0x00D166
+        )
+        embed.add_field(
+            name="Current URL",
+            value=f"`{current_url}`",
+            inline=False
+        )
+        embed.add_field(
+            name="📋 Requirements",
+            value="• Must start with https:// (recommended) or http://\n"
+                  "• Should be the domain users will access\n"
+                  "• No trailing slash\n"
+                  "• Must match your reverse proxy configuration",
+            inline=False
+        )
+        embed.add_field(
+            name="🔄 Next Steps",
+            value="After setting URL:\n"
+                  "1. Configure reverse proxy (Cloudflare, Nginx, etc.)\n"
+                  "2. Set Discord OAuth2 redirect URI to: `your_url/callback`\n"
+                  "3. Restart web interface: `[p]ai web restart`",
+            inline=False
+        )
+        
+        view = URLConfigView()
+        await ctx.send(embed=embed, view=view)
+
+    @ai_web_config.command(name="server")
+    async def ai_web_config_server(self, ctx: commands.Context):
+        """Configure web server host and port via modal.
+        
+        Default: localhost:8080
+        For public access through reverse proxy, use: 0.0.0.0:8080
+        """
+        # Create modal for server configuration
+        class ServerConfigModal(discord.ui.Modal):
+            def __init__(self, current_host: str, current_port: int):
+                super().__init__(title="Web Server Configuration", timeout=300.0)
+                
+                # Pre-fill with current values
+                self.host_input.default = current_host
+                self.port_input.default = str(current_port)
+                
+            host_input = discord.ui.TextInput(
+                label="Host",
+                placeholder="localhost (secure) or 0.0.0.0 (allow external)",
+                min_length=1,
+                max_length=50,
+                required=True
+            )
+            
+            port_input = discord.ui.TextInput(
+                label="Port",
+                placeholder="8080 (default)",
+                min_length=2,
+                max_length=5,
+                required=True
+            )
+            
+            async def on_submit(self, interaction: discord.Interaction):
+                host = self.host_input.value.strip()
+                port_str = self.port_input.value.strip()
+                
+                # Validate port
+                try:
+                    port = int(port_str)
+                    if not 1024 <= port <= 65535:
+                        await interaction.response.send_message(
+                            "❌ Port must be between 1024 and 65535.",
+                            ephemeral=True
+                        )
+                        return
+                except ValueError:
+                    await interaction.response.send_message(
+                        "❌ Port must be a valid number.",
+                        ephemeral=True
+                    )
+                    return
+                    
+                # Validate host
+                if not host:
+                    await interaction.response.send_message(
+                        "❌ Host cannot be empty.",
+                        ephemeral=True
+                    )
+                    return
+                    
+                # Get the cog instance
+                cog = interaction.client.get_cog("SkynetV2")
+                if not cog:
+                    await interaction.response.send_message(
+                        "❌ Could not access cog configuration.",
+                        ephemeral=True
+                    )
+                    return
+                    
+                # Save configuration
+                await cog.config.web_host.set(host)
+                await cog.config.web_port.set(port)
+                
+                security_note = ""
+                if host == "0.0.0.0":
+                    security_note = "\n\n⚠️ **Security Note:** Host set to 0.0.0.0 allows external connections. Ensure you have proper reverse proxy and firewall protection."
+                
+                await interaction.response.send_message(
+                    f"✅ Web server configuration updated:\n"
+                    f"Host: `{host}`\n"
+                    f"Port: `{port}`\n\n"
+                    f"**Restart required:** Use `[p]ai web restart` for changes to take effect.{security_note}",
+                    ephemeral=True
+                )
+            
+            async def on_error(self, interaction: discord.Interaction, error: Exception):
+                await interaction.response.send_message(
+                    f"❌ An error occurred: {error}",
+                    ephemeral=True
+                )
+        
+        # Create view with modal
+        class ServerConfigView(discord.ui.View):
+            def __init__(self, current_host: str, current_port: int):
+                super().__init__(timeout=60.0)
+                self.current_host = current_host
+                self.current_port = current_port
+                
+            @discord.ui.button(label="Configure Server", style=discord.ButtonStyle.primary, emoji="⚙️")
+            async def configure_server(self, interaction: discord.Interaction, button: discord.ui.Button):
+                modal = ServerConfigModal(self.current_host, self.current_port)
+                await interaction.response.send_modal(modal)
+                
+        # Get current configuration
+        current_host = await self.config.web_host() or "localhost"
+        current_port = await self.config.web_port() or 8080
+        
+        embed = discord.Embed(
+            title="⚙️ Web Server Configuration",
+            description="Configure the host and port for the web interface server.",
+            color=0xF39C12
+        )
+        embed.add_field(
+            name="Current Configuration",
+            value=f"Host: `{current_host}`\nPort: `{current_port}`",
+            inline=False
+        )
+        embed.add_field(
+            name="📋 Host Options",
+            value="• `localhost` - Secure, only local access\n"
+                  "• `0.0.0.0` - Allow external connections (use with reverse proxy)\n"
+                  "• Specific IP - Bind to specific network interface",
+            inline=False
+        )
+        embed.add_field(
+            name="🔢 Port Guidelines",
+            value="• Range: 1024-65535\n"
+                  "• Default: 8080\n"
+                  "• Avoid: 80, 443 (reserved for HTTP/HTTPS)\n"
+                  "• Check for conflicts with other services",
+            inline=False
+        )
+        embed.add_field(
+            name="🔄 After Changes",
+            value="Use `[p]ai web restart` to apply new settings.",
+            inline=False
+        )
+        
+        view = ServerConfigView(current_host, current_port)
+        await ctx.send(embed=embed, view=view)
+
+    @ai_web_config.command(name="show")
+    async def ai_web_config_show(self, ctx: commands.Context):
+        """Show current web interface configuration and status."""
+        
+        # Collect all configuration
+        oauth_config = await self.config.oauth2()
+        public_url = await self.config.web_public_url()
+        host = await self.config.web_host() or "localhost"
+        port = await self.config.web_port() or 8080
+        session_key = await self.config.web_session_key()
+        
+        # Check OAuth2 configuration status
+        oauth2_configured = bool(oauth_config.get("client_id") and oauth_config.get("client_secret"))
+        
+        # Check if web server is running
+        web_running = hasattr(self, 'web') and self.web and self.web.app
+        
+        # Determine configuration completeness
+        config_complete = oauth2_configured and public_url
+        
+        # Create status embed
+        embed = discord.Embed(
+            title="🌐 Web Interface Configuration",
+            color=0x2ECC71 if config_complete else 0xF39C12
+        )
+        
+        # OAuth2 Status
+        oauth2_status = "✅ Configured" if oauth2_configured else "❌ Not configured"
+        client_id_display = oauth_config.get('client_id', 'Not set')
+        client_secret_display = f"{oauth_config.get('client_secret', '')[:8]}***" if oauth_config.get('client_secret') else 'Not set'
+        
+        embed.add_field(
+            name="🔐 OAuth2 Authentication",
+            value=f"**Status:** {oauth2_status}\n"
+                  f"Client ID: `{client_id_display}`\n"
+                  f"Client Secret: `{client_secret_display}`",
+            inline=True
+        )
+        
+        # URL Configuration
+        url_status = "✅ Configured" if public_url else "❌ Not configured"
+        embed.add_field(
+            name="🌍 Public URL",
+            value=f"**Status:** {url_status}\n"
+                  f"URL: {f'`{public_url}`' if public_url else '`Not set`'}",
+            inline=True
+        )
+        
+        # Server Configuration
+        embed.add_field(
+            name="⚙️ Server Settings",
+            value=f"**Host:** `{host}`\n"
+                  f"**Port:** `{port}`\n"
+                  f"**Session Key:** {'`Generated`' if session_key else '`Auto-generate`'}",
+            inline=True
+        )
+        
+        # Web Server Status
+        server_status = "🟢 Running" if web_running else "🔴 Stopped"
+        embed.add_field(
+            name="📡 Web Server",
+            value=f"**Status:** {server_status}",
+            inline=True
+        )
+        
+        # Configuration Status Summary
+        if config_complete:
+            status_text = "✅ **Ready** - Web interface is fully configured"
+            embed.color = 0x2ECC71
+        elif oauth2_configured and not public_url:
+            status_text = "⚠️ **Almost Ready** - Set public URL to complete setup"
+            embed.color = 0xF39C12
+        elif public_url and not oauth2_configured:
+            status_text = "⚠️ **Almost Ready** - Configure OAuth2 to complete setup"
+            embed.color = 0xF39C12
+        else:
+            status_text = "❌ **Not Ready** - OAuth2 and public URL required"
+            embed.color = 0xE74C3C
+            
+        embed.add_field(
+            name="📋 Overall Status",
+            value=status_text,
+            inline=False
+        )
+        
+        # Next steps based on configuration state
+        next_steps = []
+        if not oauth2_configured:
+            next_steps.append("1️⃣ Configure OAuth2: `[p]ai web config oauth`")
+        if not public_url:
+            next_steps.append("2️⃣ Set public URL: `[p]ai web config url`")
+        if config_complete and not web_running:
+            next_steps.append("3️⃣ Start web server: `[p]ai web start`")
+        elif config_complete and web_running:
+            next_steps.append("✨ **Ready to use!** Access your web interface at the configured URL")
+        
+        if next_steps:
+            embed.add_field(
+                name="🚀 Next Steps" if not config_complete else "🎉 Status",
+                value="\n".join(next_steps),
+                inline=False
+            )
+        
+        # Add helpful links and tips
+        if config_complete:
+            embed.add_field(
+                name="🔗 Quick Actions",
+                value="• **Restart Server:** `[p]ai web restart`\n"
+                      "• **View Logs:** `[p]ai web status`\n"
+                      "• **Server Settings:** `[p]ai web config server`\n"
+                      "• **Reset Config:** `[p]ai web config reset`",
+                inline=False
+            )
+        else:
+            embed.add_field(
+                name="📚 Setup Help",
+                value="• **Discord App:** [Developer Portal](https://discord.com/developers/applications)\n"
+                      "• **OAuth2 Setup:** Create application and copy credentials\n"
+                      "• **Domain Setup:** Use Cloudflare Tunnel or reverse proxy\n"
+                      "• **Redirect URI:** Set to `{your_domain}/callback`",
+                inline=False
+            )
+        
+        await ctx.send(embed=embed)
+
+    @ai_web_config.command(name="reset")
+    async def ai_web_config_reset(self, ctx: commands.Context):
+        """Reset all web interface configuration to defaults via confirmation modal."""
+        
+        # Create confirmation modal
+        class ResetConfigModal(discord.ui.Modal):
+            def __init__(self):
+                super().__init__(title="Reset Web Configuration", timeout=300.0)
+                
+            confirmation_input = discord.ui.TextInput(
+                label="Type CONFIRM to reset all web configuration",
+                placeholder="CONFIRM",
+                min_length=7,
+                max_length=7,
+                required=True,
+                style=discord.TextStyle.short
+            )
+            
+            async def on_submit(self, interaction: discord.Interaction):
+                if self.confirmation_input.value != "CONFIRM":
+                    await interaction.response.send_message(
+                        "❌ Confirmation text did not match. Reset cancelled.",
+                        ephemeral=True
+                    )
+                    return
+                    
+                # Get the cog instance
+                cog = interaction.client.get_cog("SkynetV2")
+                if not cog:
+                    await interaction.response.send_message(
+                        "❌ Could not access cog configuration.",
+                        ephemeral=True
+                    )
+                    return
+                    
+                # Reset all web config
+                await cog.config.oauth2.set({"client_id": None, "client_secret": None})
+                await cog.config.web_public_url.set(None)
+                await cog.config.web_host.set("localhost")
+                await cog.config.web_port.set(8080)
+                await cog.config.web_session_key.set(None)
+                
+                await interaction.response.send_message(
+                    "✅ **Web configuration reset to defaults:**\n\n"
+                    "• Public URL: *Not configured*\n"
+                    "• Host: `localhost`\n"
+                    "• Port: `8080`\n"
+                    "• OAuth2 credentials: *Cleared*\n"
+                    "• Session key: *Regenerated*\n\n"
+                    "**Next steps:**\n"
+                    "1. Configure OAuth2 credentials: `[p]ai web config oauth`\n"
+                    "2. Set public URL: `[p]ai web config url`\n"
+                    "3. Restart web server: `[p]ai web restart`",
+                    ephemeral=True
+                )
+            
+            async def on_error(self, interaction: discord.Interaction, error: Exception):
+                await interaction.response.send_message(
+                    f"❌ An error occurred during reset: {error}",
+                    ephemeral=True
+                )
+        
+        # Create view with confirmation button
+        class ResetConfirmView(discord.ui.View):
+            def __init__(self):
+                super().__init__(timeout=60.0)
+                
+            @discord.ui.button(label="Reset Configuration", style=discord.ButtonStyle.danger, emoji="🗑️")
+            async def reset_config(self, interaction: discord.Interaction, button: discord.ui.Button):
+                modal = ResetConfigModal()
+                await interaction.response.send_modal(modal)
+                
+            @discord.ui.button(label="Cancel", style=discord.ButtonStyle.secondary, emoji="❌")
+            async def cancel_reset(self, interaction: discord.Interaction, button: discord.ui.Button):
+                await interaction.response.send_message("Reset cancelled.", ephemeral=True)
+                self.stop()
+        
+        embed = discord.Embed(
+            title="🗑️ Reset Web Configuration",
+            description="This will reset **ALL** web interface configuration to defaults.",
+            color=0xE74C3C
+        )
+        embed.add_field(
+            name="⚠️ What will be reset",
+            value="• OAuth2 client credentials\n"
+                  "• Public URL setting\n"
+                  "• Server host and port\n"
+                  "• Session encryption key",
+            inline=False
+        )
+        embed.add_field(
+            name="🔄 After Reset",
+            value="You'll need to:\n"
+                  "1. Reconfigure OAuth2 credentials\n"
+                  "2. Set your public URL\n"
+                  "3. Restart the web server",
+            inline=False
+        )
+        embed.add_field(
+            name="💡 Tip",
+            value="Consider backing up your current configuration before resetting.",
+            inline=False
+        )
+        
+        view = ResetConfirmView()
+        await ctx.send(embed=embed, view=view)
+
+    @ai_web.command(name="restart")
+    @checks.is_owner()
+    async def ai_web_restart(self, ctx: commands.Context):
+        """Restart the web interface server."""
+        try:
+            if self.web:
+                await self.web.stop_server()
+                await self.web.start_server()
+                await ctx.send("✅ Web interface restarted successfully.")
+            else:
+                await ctx.send("❌ Web interface is not initialized.")
+        except Exception as e:
+            await ctx.send(f"❌ Failed to restart web interface: {e}")
+
+    # Legacy token commands (kept for backwards compatibility)
+    @ai_web.group(name="token")
+    async def ai_web_token_legacy(self, ctx: commands.Context):
+        """Legacy token management (deprecated - use OAuth2 login)."""
+        if not ctx.invoked_subcommand:
+            await ctx.send("⚠️ **Token authentication is deprecated.**\n"
+                           "Please use the new OAuth2 web interface:\n"
+                           "1. Configure OAuth2: `[p]ai web config oauth`\n"
+                           "2. Set public URL: `[p]ai web config url`\n"
+                           "3. Access via: your configured domain")
+
+    # ----------------
+    # Cog Lifecycle
+    # ----------------
+
+    async def cog_load(self):
+        """Called when the cog is loaded."""
+        try:
+            await self.web.start_server()
+        except Exception as e:
+            print(f"Failed to start SkynetV2 web interface: {e}")
+
+    async def cog_unload(self):
+        """Called when the cog is unloaded."""
+        try:
+            if self.web:
+                await self.web.stop_server()
+        except Exception as e:
+            print(f"Error stopping SkynetV2 web interface: {e}")
 
     # Red automatically handles slash command registration for class-level app_commands.Group
     # No manual tree management needed in cog_load/cog_unload

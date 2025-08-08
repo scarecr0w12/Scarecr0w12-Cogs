@@ -40,7 +40,7 @@ AI assistant cog focused on usability, governance, and extensibility.
 **Quick Start:**
 1. Set a key: `[p]ai provider key set openai <KEY> --global`
 2. Choose a model: `[p]ai model set openai gpt-4o-mini`
-3. Chat: `/ai chat "hello"`
+3. Chat: `/skynet chat "hello"` or `[p]ai chat "hello"`
 
 **Documentation:**
 - [Commands](docs/commands.md)

@@ -13,6 +13,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Fixed
 
 - Fixed CommandAlreadyRegistered error caused by naming conflict between prefix and slash command groups
+- Changed slash commands from `/ai` to `/skynet` to resolve command registration conflict (prefix commands remain `[p]ai`)
 
 ## [1.0.0] - 2025-08-08
 

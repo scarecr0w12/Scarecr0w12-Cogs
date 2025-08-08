@@ -2,19 +2,21 @@
 
 Implemented commands (prefix + slash mirrors where noted).
 
+**Note**: Slash commands use `/skynet` instead of `/ai` to avoid conflicts.
+
 ## Chat
 
-- /ai chat message:string stream?:bool
+- /skynet chat message:string stream?:bool
 - [p]ai chat message
 - [p]ai chatstream message (streaming prefix variant)
 
 ## Tools
 
-- /ai tools list
-- /ai tools enable name:string
-- /ai tools disable name:string
-- /ai websearch query:string (records tool usage telemetry; subject to tool rate limits)
-- /ai autosearch query:string execute?:bool (heuristic classification; executes search mode and stub executions for other modes)
+- /skynet tools list
+- /skynet tools enable name:string
+- /skynet tools disable name:string
+- /skynet websearch query:string (records tool usage telemetry; subject to tool rate limits)
+- /skynet autosearch query:string execute?:bool (heuristic classification; executes search mode and stub executions for other modes)
 - [p]ai tools list|enable|disable `name`
 - [p]ai websearch `query`
 - [p]ai autosearch `query [--exec]` (append --exec to run execution; non-search modes are stubbed)
@@ -22,14 +24,14 @@ Implemented commands (prefix + slash mirrors where noted).
 
 ## Search Provider
 
-- /ai search show
-- /ai search set provider:string (use 'inherit' to reset; providers: dummy, serp, serp-stub)
+- /skynet search show
+- /skynet search set provider:string (use 'inherit' to reset; providers: dummy, serp, serp-stub)
 - [p]ai search show
 - [p]ai search set <provider|inherit> (providers: dummy, serp, serp-stub)
 
 ## Provider Keys
 
-- /ai provider key_set provider:string key:string global_scope?:bool
+- /skynet provider key_set provider:string key:string global_scope?:bool
 - [p]ai provider key set <provider> <key> [--global]
 - [p]ai provider key show
 
@@ -37,11 +39,11 @@ Supported providers: openai, serp, firecrawl
 
 ## Memory
 
-- /ai memory show limit?:int
-- /ai memory prune limit?:int
-- /ai memory export user_id?:int (ephemeral; DM alternative via prefix)
-- /ai memory clear (clears all guild memory)
-- /ai memory prune_policy max_items?:int max_age_days?:int
+- /skynet memory show limit?:int
+- /skynet memory prune limit?:int
+- /skynet memory export user_id?:int (ephemeral; DM alternative via prefix)
+- /skynet memory clear (clears all guild memory)
+- /skynet memory prune_policy max_items?:int max_age_days?:int
 - [p]ai memory show [limit]
 - [p]ai memory prune [limit]
 - [p]ai memory export [user_id]
@@ -50,10 +52,10 @@ Supported providers: openai, serp, firecrawl
 
 ## Stats & Rate Limits
 
-- /ai stats top?:int
+- /skynet stats top?:int
 - [p]ai stats [top]
-- /ai rate show
-- /ai rate set cooldown_sec?:int per_user_per_min?:int per_channel_per_min?:int tools_per_user_per_min?:int tools_per_guild_per_min?:int tool?:string tool_cooldown_sec?:int
+- /skynet rate show
+- /skynet rate set cooldown_sec?:int per_user_per_min?:int per_channel_per_min?:int tools_per_user_per_min?:int tools_per_guild_per_min?:int tool?:string tool_cooldown_sec?:int
 - [p]ai rate show
 - [p]ai rate set [cooldown_sec] [per_user_per_min] [per_channel_per_min] [tools_per_user_per_min] [tools_per_guild_per_min] [tool] [tool_cooldown_sec]
 
@@ -63,7 +65,7 @@ Listening enable/disable and mode commands will be surfaced in future updates; i
 
 ## Notes
 
-- Streaming via `/ai chat stream:true` or `[p]ai chatstream`.
+- Streaming via `/skynet chat stream:true` or `[p]ai chatstream`.
 - Tool commands require the tool to be enabled (`ai tools enable <name>`).
 - Tool usage telemetry stored under guild usage.tools (total & per_tool counters) and governed by tool-specific rate limits.
 - Stats output now includes tool usage summary with latency tracking, success/error rates, and top tools by count.

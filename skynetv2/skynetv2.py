@@ -433,7 +433,7 @@ class SkynetV2(ToolsMixin, MemoryMixin, StatsMixin, ListenerMixin, Orchestration
     # Slash commands
     # ----------------
 
-    ai_slash = app_commands.Group(name="ai", description="AI assistant commands")
+    ai_slash = app_commands.Group(name="skynet", description="AI assistant commands")
 
     # Slash governance group (moved here after ai group definition)
     governance_group = app_commands.Group(name="governance", description="Governance controls", parent=ai_slash)

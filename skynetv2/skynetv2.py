@@ -302,6 +302,8 @@ class SkynetV2(ToolsMixin, MemoryMixin, StatsMixin, ListenerMixin, Orchestration
     @checks.admin_or_permissions(manage_guild=True)
     async def ai_rate(self, ctx: commands.Context):
         """View or set rate limits."""
+        if not ctx.invoked_subcommand:
+            await ctx.send_help()
 
     @ai_rate.command(name="show")
     async def ai_rate_show(self, ctx: commands.Context):
@@ -349,6 +351,8 @@ class SkynetV2(ToolsMixin, MemoryMixin, StatsMixin, ListenerMixin, Orchestration
     @checks.admin_or_permissions(manage_guild=True)
     async def ai_governance(self, ctx: commands.Context):
         """Governance policy controls."""
+        if not ctx.invoked_subcommand:
+            await ctx.send_help()
 
     @ai_governance.command(name="show")
     async def ai_governance_show(self, ctx: commands.Context):
@@ -367,6 +371,8 @@ class SkynetV2(ToolsMixin, MemoryMixin, StatsMixin, ListenerMixin, Orchestration
     @ai_governance.group(name="allow")
     async def ai_governance_allow(self, ctx: commands.Context):
         """Manage allowed tools list."""
+        if not ctx.invoked_subcommand:
+            await ctx.send_help()
 
     @ai_governance_allow.command(name="add")
     async def ai_governance_allow_add(self, ctx: commands.Context, tool: str):
@@ -381,6 +387,8 @@ class SkynetV2(ToolsMixin, MemoryMixin, StatsMixin, ListenerMixin, Orchestration
     @ai_governance.group(name="deny")
     async def ai_governance_deny(self, ctx: commands.Context):
         """Manage denied tools list."""
+        if not ctx.invoked_subcommand:
+            await ctx.send_help()
 
     @ai_governance_deny.command(name="add")
     async def ai_governance_deny_add(self, ctx: commands.Context, tool: str):
@@ -395,6 +403,8 @@ class SkynetV2(ToolsMixin, MemoryMixin, StatsMixin, ListenerMixin, Orchestration
     @ai_governance.group(name="bypass")
     async def ai_governance_bypass(self, ctx: commands.Context):
         """Manage cooldown bypass roles."""
+        if not ctx.invoked_subcommand:
+            await ctx.send_help()
 
     @ai_governance_bypass.command(name="addrole")
     async def ai_governance_bypass_add(self, ctx: commands.Context, role: discord.Role):
@@ -409,6 +419,8 @@ class SkynetV2(ToolsMixin, MemoryMixin, StatsMixin, ListenerMixin, Orchestration
     @ai_governance.group(name="override")
     async def ai_governance_override(self, ctx: commands.Context):
         """Per-tool per-user minute cap overrides."""
+        if not ctx.invoked_subcommand:
+            await ctx.send_help()
 
     @ai_governance_override.command(name="set")
     async def ai_governance_override_set(self, ctx: commands.Context, tool: str, per_minute: int):
@@ -423,6 +435,8 @@ class SkynetV2(ToolsMixin, MemoryMixin, StatsMixin, ListenerMixin, Orchestration
     @ai_governance.group(name="budget")
     async def ai_governance_budget(self, ctx: commands.Context):
         """Budget caps."""
+        if not ctx.invoked_subcommand:
+            await ctx.send_help()
 
     @ai_governance_budget.command(name="settokens")
     async def ai_governance_budget_settokens(self, ctx: commands.Context, per_user_daily_tokens: int):
@@ -767,6 +781,8 @@ class SkynetV2(ToolsMixin, MemoryMixin, StatsMixin, ListenerMixin, Orchestration
     @checks.admin_or_permissions(manage_guild=True)
     async def ai_tools(self, ctx: commands.Context):
         """Manage AI tools (enable/disable/list)."""
+        if not ctx.invoked_subcommand:
+            await ctx.send_help()
 
     @ai_tools.command(name="list")
     async def ai_tools_list(self, ctx: commands.Context):
@@ -838,6 +854,8 @@ class SkynetV2(ToolsMixin, MemoryMixin, StatsMixin, ListenerMixin, Orchestration
     @checks.admin_or_permissions(manage_guild=True)
     async def ai_search(self, ctx: commands.Context):
         """Search provider controls."""
+        if not ctx.invoked_subcommand:
+            await ctx.send_help()
 
     @ai_search.command(name="show")
     async def ai_search_show(self, ctx: commands.Context):
@@ -897,10 +915,14 @@ class SkynetV2(ToolsMixin, MemoryMixin, StatsMixin, ListenerMixin, Orchestration
     @checks.admin_or_permissions(manage_guild=True)
     async def ai_provider(self, ctx: commands.Context):
         """Provider management commands."""
+        if not ctx.invoked_subcommand:
+            await ctx.send_help()
 
     @ai_provider.group(name="key")
     async def ai_provider_key(self, ctx: commands.Context):
         """Manage provider API keys."""
+        if not ctx.invoked_subcommand:
+            await ctx.send_help()
 
     @ai_provider_key.command(name="set")
     async def ai_provider_key_set(self, ctx: commands.Context, provider: str, key: str, global_flag: Optional[str] = None):

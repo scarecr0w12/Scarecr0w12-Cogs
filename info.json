@@ -1,0 +1,6 @@
+{
+  "author": ["Scarecr0w12"],
+  "description": "A collection of AI-powered cogs for Red-DiscordBot, including SkynetV2 with multi-provider LLM support, advanced search capabilities, and intelligent tool orchestration.",
+  "short": "AI-powered cogs for Red-DiscordBot",
+  "install_msg": "Thanks for adding Scarecr0w12's cogs! Available cogs: SkynetV2. Use [p]cog install Scarecr0w12-Cogs <cogname> to install individual cogs."
+}

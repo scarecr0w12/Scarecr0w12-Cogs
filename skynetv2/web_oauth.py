@@ -72,28 +72,30 @@ class WebInterface:
                 # Non-fatal; still attempt to use in-memory key
                 print(f"SkynetV2 Web: Failed to persist session key ({e}); using ephemeral.")
         
-        # Final validation before use
+        # Final validation before use  
         try:
             # Test that the key works with Fernet first
             if isinstance(key, str):
                 # Key is stored as base64 string - test it works
                 test_fernet = fernet.Fernet(key.encode('utf-8'))
-                # EncryptedCookieStorage expects the base64 string as bytes
-                self.session_key = key.encode('utf-8')
+                # EncryptedCookieStorage expects the decoded 32 bytes
+                self.session_key = base64.urlsafe_b64decode(key)
             else:
                 # Key is already bytes - test it works
                 test_fernet = fernet.Fernet(key)
-                self.session_key = key
+                # Decode if it's base64 encoded bytes, otherwise use as-is
+                if len(key) == 44:  # base64 encoded
+                    self.session_key = base64.urlsafe_b64decode(key)
+                else:
+                    self.session_key = key
                 
             print("SkynetV2 Web: Session key validated for middleware setup.")
         except Exception as e:
             print(f"SkynetV2 Web: Final session key validation failed: {e}")
-            # Generate emergency fallback key (generate as string, then encode to bytes)
-            emergency_key = fernet.Fernet.generate_key().decode()
-            self.session_key = emergency_key.encode('utf-8')
-            print("SkynetV2 Web: Using emergency ephemeral session key.")
-        
-        # Load OAuth2 configuration
+            # Generate emergency fallback key (generate as bytes, use decoded)
+            emergency_key_bytes = fernet.Fernet.generate_key()
+            self.session_key = base64.urlsafe_b64decode(emergency_key_bytes.decode())
+            print("SkynetV2 Web: Using emergency ephemeral session key.")        # Load OAuth2 configuration
         oauth_config = await config.oauth2()
         self.client_id = oauth_config.get('client_id')
         self.client_secret = oauth_config.get('client_secret')

@@ -4,6 +4,7 @@ Original WebInterface will later import and use this version.
 from __future__ import annotations
 import time
 import secrets
+import base64
 from typing import Optional, Dict, Any, List
 from aiohttp import web, ClientSession
 from aiohttp_session import setup
@@ -66,19 +67,23 @@ class WebInterface:  # Partial; only startup + shared existing methods moved gra
             if isinstance(key, str):
                 # Key is stored as base64 string - test it works
                 test_fernet = fernet.Fernet(key.encode('utf-8'))
-                # EncryptedCookieStorage expects the base64 string as bytes
-                self.session_key = key.encode('utf-8')
+                # EncryptedCookieStorage expects the decoded 32 bytes
+                self.session_key = base64.urlsafe_b64decode(key)
             else:
                 # Key is already bytes - test it works
                 test_fernet = fernet.Fernet(key)
-                self.session_key = key
+                # Decode if it's base64 encoded bytes, otherwise use as-is
+                if len(key) == 44:  # base64 encoded
+                    self.session_key = base64.urlsafe_b64decode(key)
+                else:
+                    self.session_key = key
                 
             print("SkynetV2 Web: Session key validated for middleware setup.")
         except Exception as e:
             print(f"SkynetV2 Web: Final session key validation failed: {e}")
-            # Generate emergency fallback key (generate as string, then encode to bytes)
-            emergency_key = fernet.Fernet.generate_key().decode()
-            self.session_key = emergency_key.encode('utf-8')
+            # Generate emergency fallback key (generate as bytes, use decoded)
+            emergency_key_bytes = fernet.Fernet.generate_key()
+            self.session_key = base64.urlsafe_b64decode(emergency_key_bytes.decode())
             print("SkynetV2 Web: Using emergency ephemeral session key.")
 
     async def initialize_config(self):

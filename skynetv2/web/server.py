@@ -15,6 +15,23 @@ class WebServer:
         impl_cls: Any = WebInterface  # type: ignore
         self._impl = impl_cls(cog) if impl_cls else None
 
+    # Backwards compatibility property accessors
+    @property
+    def app(self):  # legacy code checks self.web.app
+        return getattr(self._impl, 'app', None)
+
+    @property
+    def host(self):  # optional exposure
+        return getattr(self._impl, 'host', None)
+
+    @property
+    def port(self):  # optional exposure
+        return getattr(self._impl, 'port', None)
+
+    @property
+    def public_url(self):  # optional exposure
+        return getattr(self._impl, 'public_url', None)
+
     async def start(self):
         if self._impl:
             await self._impl.start_server()

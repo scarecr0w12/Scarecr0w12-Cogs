@@ -233,19 +233,20 @@ class ToolsMixin:
             err = await self._check_tool_rate_limits(guild, user, tool="websearch")
             if err:
                 return err
-        
         async def _websearch_impl():
-            # Resolve search provider and API key
             kind, api_key = await self._resolve_search_provider_and_key(guild)
             provider = build_search_provider(kind=kind, api_key=api_key)
             results = await provider.search(query=query, topk=topk)
+            # Increment provider usage telemetry
+            async with self.config.guild(guild).usage() as usage:
+                sp = usage.setdefault("search_providers", {})
+                sp[kind] = int(sp.get(kind, 0)) + 1
             if not results:
                 return "(empty query)" if not (query or '').strip() else "(no results)"
             lines = [f"provider: {getattr(provider, 'name', 'unknown')} | query: {query[:60]}"]
             for idx, r in enumerate(results, start=1):
                 lines.append(f"{idx}. {r[:160]}")
             return "\n".join(lines)[:1000]
-        
         return await self._execute_tool_with_telemetry(guild, "websearch", _websearch_impl)
 
     # New heuristic auto search routing tool (with optional execution of search mode)

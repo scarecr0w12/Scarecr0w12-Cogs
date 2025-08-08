@@ -43,22 +43,45 @@ class WebInterface:
         key = await config.web_session_key()
         regenerate = False
         if not key:
+            print("SkynetV2 Web: No session key found; generating new one.")
             regenerate = True
         else:
             try:
                 # Ensure it is valid Fernet key (44 char base64, decodes to 32 bytes)
-                fernet.Fernet(key.encode())
-            except Exception:
-                print("SkynetV2 Web: Stored session key invalid; regenerating.")
+                if not isinstance(key, str) or len(key) != 44:
+                    raise ValueError(f"Key must be 44-char string, got {type(key)} len={len(key) if key else 'None'}")
+                test_fernet = fernet.Fernet(key.encode())
+                print(f"SkynetV2 Web: Using existing valid session key.")
+            except Exception as e:
+                print(f"SkynetV2 Web: Stored session key invalid ({e}); regenerating.")
                 regenerate = True
+        
         if regenerate:
+            # Clear any existing invalid key first
+            try:
+                await config.web_session_key.clear()
+            except Exception:
+                pass
+            
             key = fernet.Fernet.generate_key().decode()
+            print(f"SkynetV2 Web: Generated new session key (len={len(key)}).")
             try:
                 await config.web_session_key.set(key)
-            except Exception:
+                print("SkynetV2 Web: Successfully stored new session key.")
+            except Exception as e:
                 # Non-fatal; still attempt to use in-memory key
-                print("SkynetV2 Web: Failed to persist regenerated session key; using ephemeral.")
-        self.session_key = key.encode()
+                print(f"SkynetV2 Web: Failed to persist session key ({e}); using ephemeral.")
+        
+        # Final validation before use
+        try:
+            self.session_key = key.encode()
+            test_storage = fernet.Fernet(self.session_key)
+            print("SkynetV2 Web: Session key validated for middleware setup.")
+        except Exception as e:
+            print(f"SkynetV2 Web: Final session key validation failed: {e}")
+            # Generate emergency fallback key
+            self.session_key = fernet.Fernet.generate_key()
+            print("SkynetV2 Web: Using emergency ephemeral session key.")
         
         # Load OAuth2 configuration
         oauth_config = await config.oauth2()
@@ -88,8 +111,15 @@ class WebInterface:
             
         self.app = web.Application()
         
-        # Setup session middleware
-        setup(self.app, EncryptedCookieStorage(self.session_key, max_age=86400))
+        # Setup session middleware with error handling
+        try:
+            print(f"SkynetV2 Web: Setting up session storage with key type {type(self.session_key)}.")
+            setup(self.app, EncryptedCookieStorage(self.session_key, max_age=86400))
+            print("SkynetV2 Web: Session middleware setup successful.")
+        except Exception as e:
+            print(f"SkynetV2 Web: Session middleware setup failed: {e}")
+            print(f"SkynetV2 Web: Key details - type: {type(self.session_key)}, len: {len(self.session_key) if self.session_key else 'None'}")
+            raise
         
         # Add routes
         self.setup_routes()

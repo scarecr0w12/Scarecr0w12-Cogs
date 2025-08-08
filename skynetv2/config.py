@@ -55,6 +55,8 @@ def register_config(cog) -> Config:
             "tools_guild_count_1m": 0,
             # Autosearch classification & execution counters
             "autosearch": {"classified": 0, "executed": {"search": 0, "scrape": 0, "crawl": 0, "deep_research": 0}},
+            # Search provider usage counts
+            "search_providers": {},  # provider_name -> count
         },
         # Autosearch safety caps (chars for aggregated scrape outputs) + behavior flags
         "autosearch_caps": {"scrape_chars": 4000, "autoscrape_single": False},

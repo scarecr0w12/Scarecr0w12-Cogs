@@ -24,11 +24,12 @@ AI assistant cog focused on usability, governance, and extensibility.
 ```
 
 **Features:**
+
 - Chat (prefix + slash) with streaming support
-- Provider abstraction (OpenAI implemented)  
+- Provider abstraction (OpenAI implemented)
 - Per-channel memory window with show/prune/export/clear + prune policy (max items / max age)
 - Tool registry (ping + dummy websearch) with enable/disable
-- Search abstraction (configurable provider: `dummy`, `serp` stub; guild override)
+- Search abstraction (providers: `dummy`, real `serp` (SerpAPI), `serp-stub` fallback; guild override)
 - Tool-specific rate limits + general cooldown / per-user / per-channel limits (owner bypass)
 - Usage stats: chats, tokens, cost estimate, top users/channels, tool usage & top tools
 - Cost estimation (editable pricing map)
@@ -41,7 +42,19 @@ AI assistant cog focused on usability, governance, and extensibility.
 - **Web Interface (OAuth2)**: Discord OAuth2 authentication with role-based permissions for guild management, configuration, and monitoring. Supports custom domains with reverse proxy SSL termination.
 - **Prompt Templates (Web)**: Manage reusable prompt snippets (global + guild) with variable interpolation via web dashboard.
 
+### Search & Autosearch Overview
+
+SkynetV2 includes a lightweight heuristic autosearch planner:
+
+1. Classifies a user query (e.g. needs simple search vs. deeper content gathering).
+2. Produces an execution plan (mode + caps). Modes: `search`, `scrape`, `crawl`, `deep_research`.
+3. (Current state) Executes safe placeholder logic; Firecrawl integration enables real scrape/crawl/deep research when an API key is configured.
+4. Optionally auto-scrapes the top result when high-confidence single result (configurable flag).
+
+Safety caps (depth, result limits, total characters) prevent runaway usage. Future work (see `docs/todo.md`) will add a real SERP provider and richer telemetry.
+
 **Quick Start:**
+
 1. Set a key: `[p]ai provider key set openai <KEY> --global`
 2. Choose a model: `[p]ai model set openai gpt-4o-mini`
 3. Chat: `/skynet chat "hello"` or `[p]ai chat "hello"`

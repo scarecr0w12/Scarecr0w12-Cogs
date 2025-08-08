@@ -1077,26 +1077,5 @@ class SkynetV2(ToolsMixin, MemoryMixin, StatsMixin, ListenerMixin, Orchestration
         """Mask sensitive API keys for display."""
         return self.error_handler.redact_secrets(key)
 
-    # Register the slash group on cog load
-    def cog_load(self):
-        """Called when the cog is loaded."""
-        try:
-            # Remove any existing command with the same name first
-            self.bot.tree.remove_command(self.ai_slash.name)
-        except Exception:
-            pass
-        
-        try:
-            self.bot.tree.add_command(self.ai_slash)
-        except Exception as e:
-            # Log the error for debugging
-            import logging
-            logger = logging.getLogger("red.skynetv2")
-            logger.error(f"Failed to add slash command group: {e}")
-
-    def cog_unload(self):
-        """Called when the cog is unloaded."""
-        try:
-            self.bot.tree.remove_command(self.ai_slash.name)
-        except Exception:
-            pass
+    # Red automatically handles slash command registration for class-level app_commands.Group
+    # No manual tree management needed in cog_load/cog_unload

@@ -7,6 +7,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ## [Unreleased]
 
 ### Added
+- (none)
+
+### Changed
+- (none)
+
+### Fixed
+- (none)
+
+## [1.4.0] - 2025-08-08
+
+### Added
 - Real SERP search provider (`search_serp.py`) replacing inline stub logic with external adapter and fallback.
 - Per-search-provider usage telemetry map (`usage.search_providers`) tracking invocation counts.
 - Firecrawl adapter scaffold (`firecrawl.py`) with search/scrape/crawl/deep_research async methods and internal IP blocking.
@@ -18,6 +29,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Web interface now validates & auto-regenerates invalid Fernet session keys (more robust startup) and exposes internal helper for future session key rotation.
 
 ### Fixed
+- Enhanced session key validation with detailed error handling and automatic recovery from corrupted keys.
 - Improved user-facing error clarity for SERP failures (standard `[serp-error]` prefix).
 
 ## [1.3.0] - 2025-08-08

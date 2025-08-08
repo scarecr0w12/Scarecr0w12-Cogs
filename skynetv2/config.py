@@ -24,6 +24,12 @@ def register_config(cog) -> Config:
         "pricing": {},
         # Global search defaults (providers: dummy, serp, serp-stub)
         "search": {"provider": "dummy"},
+        # Web interface configuration
+        "oauth2": {"client_id": None, "client_secret": None},
+        "web_public_url": None,  # e.g., https://mybot.example.com
+        "web_host": "localhost",
+        "web_port": 8080,
+        "web_session_key": None,  # Auto-generated encryption key
     }
 
     default_guild = {
@@ -60,6 +66,8 @@ def register_config(cog) -> Config:
         "search": None,
         # Stretch features: token truncation, cache, experimental features
         "stretch": {"truncation": {"enabled": True, "max_tool_output_chars": 8000}, "cache": {"enabled": False, "max_entries": 1000, "ttl_hours": 1}, "experimental": {"chain_planning": False, "localization": False}},
+        # Web interface authentication tokens
+        "web_tokens": {},
     }
 
     conf.register_global(**default_global)

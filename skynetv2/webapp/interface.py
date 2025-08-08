@@ -24,6 +24,12 @@ class WebInterface:  # Partial; only startup + shared existing methods moved gra
         self.client_secret = None
         self.session_key = None
 
+    async def _regenerate_session_key(self):
+        new_key = fernet.Fernet.generate_key().decode()
+        await self.cog.config.web_session_key.set(new_key)
+        self.session_key = new_key.encode()
+        print("SkynetV2 Web: Auto-regenerated invalid/mismatched session key.")
+
     async def initialize_config(self):
         config = self.cog.config
         key = await config.web_session_key()
@@ -59,7 +65,16 @@ class WebInterface:  # Partial; only startup + shared existing methods moved gra
             print("SkynetV2 Web: Public URL not configured.")
             return
         self.app = web.Application()
-        setup(self.app, EncryptedCookieStorage(self.session_key, max_age=86400))
+        # session storage with key auto-repair fallback
+        try:
+            setup(self.app, EncryptedCookieStorage(self.session_key, max_age=86400))
+        except Exception:
+            await self._regenerate_session_key()
+            try:
+                setup(self.app, EncryptedCookieStorage(self.session_key, max_age=86400))
+            except Exception as e:
+                print(f"SkynetV2 Web: Failed to initialize session storage after regeneration: {e}")
+                return
         # defer route registration to package init
         from . import auth, pages, api  # noqa
         auth.setup(self)

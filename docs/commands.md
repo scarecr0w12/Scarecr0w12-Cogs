@@ -128,6 +128,8 @@ Show web interface status and configuration.
 
 SkynetV2 includes a Discord OAuth2 web interface with role-based permissions.
 
+Session encryption key is auto-validated on restart; invalid/missing keys are regenerated silently (see configuration docs). Dashboard / profile / API endpoints are planned; current MVP exposes legacy token status endpoint plus OAuth2 login flow (future routes commented out in code).
+
 ### OAuth2 Configuration (Bot Owner Only)
 - `[p]ai web config oauth` - **Configure Discord OAuth2 credentials via secure modal**
   - Interactive modal form for client ID and client secret

@@ -299,3 +299,16 @@ Advanced features that are work-in-progress or experimental.
 - Default configuration enables truncation, disables caching
 - Existing functionality unaffected when stretch features disabled
 - Configuration migration handled automatically
+
+## Web Session Security
+
+The web interface uses an encrypted cookie session (Fernet). On startup the cog now validates the stored `web_session_key`:
+- Missing / wrong type
+- Incorrect length (expected 44 chars base64)
+- Fails Fernet construction
+
+If invalid, a new key is generated automatically and stored. A console log line is emitted:
+```text
+SkynetV2 Web: Generated new session encryption key (previous was missing/invalid).
+```
+No previous key material is logged. Admins can force regeneration by resetting web config (`[p]ai web config reset`).

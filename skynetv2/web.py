@@ -4,19 +4,15 @@ Provides Discord OAuth2 authentication with role-based permissions.
 """
 from __future__ import annotations
 
-import asyncio
 import json
 import secrets
 import time
-import base64
-import hashlib
-from urllib.parse import urlencode, parse_qs
+from urllib.parse import urlencode
 from typing import Optional, Dict, Any, List
 from aiohttp import web, ClientSession
 from aiohttp_session import setup, get_session, new_session
 from aiohttp_session.cookie_storage import EncryptedCookieStorage
 from cryptography import fernet
-from redbot.core import Config
 import discord
 
 
@@ -37,12 +33,27 @@ class WebInterface:
         
     async def initialize_config(self):
         """Initialize web interface configuration."""
-        # Get or generate session encryption key
+        # Get or generate (and validate) session encryption key
         config = self.cog.config
         key = await config.web_session_key()
-        if not key:
-            key = fernet.Fernet.generate_key().decode()
-            await config.web_session_key.set(key)
+        regenerate = False
+        if not key or not isinstance(key, str):  # missing or wrong type
+            regenerate = True
+        else:
+            # Basic length check (Fernet url-safe base64 key: 32 bytes => 44 chars)
+            if len(key) != 44:
+                regenerate = True
+            else:
+                try:
+                    # Attempt to construct Fernet to verify validity
+                    fernet.Fernet(key.encode())
+                except Exception:
+                    regenerate = True
+        if regenerate:
+            new_key = fernet.Fernet.generate_key().decode()
+            await config.web_session_key.set(new_key)
+            key = new_key
+            print("SkynetV2 Web: Generated new session encryption key (previous was missing/invalid).")
         self.session_key = key.encode()
         
         # Load OAuth2 configuration
@@ -102,28 +113,21 @@ class WebInterface:
                 
     def setup_routes(self):
         """Setup web application routes."""
-        # Authentication routes
-        self.app.router.add_get('/', self.index)
+        self.app.router.add_get('/', self.index)  # Landing/login page
         self.app.router.add_get('/login', self.login)
         self.app.router.add_get('/callback', self.oauth_callback)
         self.app.router.add_get('/logout', self.logout)
-        
-        # Dashboard routes
-        self.app.router.add_get('/dashboard', self.dashboard)
-        self.app.router.add_get('/guild/{guild_id}', self.guild_dashboard)
-        self.app.router.add_get('/profile', self.user_profile)
-        
-        # Configuration routes (admin only)
-        self.app.router.add_get('/config/{guild_id}', self.guild_config)
-        self.app.router.add_post('/config/{guild_id}', self.update_guild_config)
-        
-        # API routes
-        self.app.router.add_get('/api/guilds', self.api_guilds)
-        self.app.router.add_get('/api/status/{guild_id}', self.api_guild_status)
-        
-        # Legacy token endpoint for backwards compatibility
-        self.app.router.add_get('/status/{guild_id}', self.legacy_guild_status)
-                
+        # Minimal status (legacy token) wiring to existing guild_status handler
+        self.app.router.add_get('/status/{guild_id}', self.guild_status)
+        # TODO: Future authenticated dashboard endpoints
+        # self.app.router.add_get('/dashboard', self.dashboard)
+        # self.app.router.add_get('/guild/{guild_id}', self.guild_dashboard)
+        # self.app.router.add_get('/profile', self.user_profile)
+        # self.app.router.add_get('/config/{guild_id}', self.guild_config)
+        # self.app.router.add_post('/config/{guild_id}', self.update_guild_config)
+        # self.app.router.add_get('/api/guilds', self.api_guilds)
+        # self.app.router.add_get('/api/status/{guild_id}', self.api_guild_status)
+
     async def stop_server(self):
         """Stop the web server."""
         if self.site:
@@ -273,8 +277,8 @@ class WebInterface:
                         return web.Response(text='Failed to get guild info', status=400)
                     user_guilds = await resp.json()
                     
-        except Exception as e:
-            return web.Response(text=f'OAuth2 error: {e}', status=500)
+        except Exception:
+            return web.Response(text='OAuth2 error occurred. Please try again later.', status=500)
             
         # Determine user permissions
         permissions = await self.get_user_permissions(user_info, user_guilds)
@@ -360,39 +364,6 @@ class WebInterface:
                 }
             )
         return web.Response(status=404)
-        
-    async def index(self, request: web.Request):
-        """Simple index page."""
-        html = """
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <title>SkynetV2 Web Interface</title>
-            <style>
-                body { font-family: Arial, sans-serif; margin: 40px; background: #f5f5f5; }
-                .container { max-width: 800px; margin: 0 auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
-                h1 { color: #333; border-bottom: 2px solid #007acc; padding-bottom: 10px; }
-                .info { background: #e7f3ff; padding: 15px; border-radius: 5px; margin: 20px 0; }
-                pre { background: #f8f8f8; padding: 10px; border-radius: 5px; overflow-x: auto; }
-            </style>
-        </head>
-        <body>
-            <div class="container">
-                <h1>SkynetV2 Web Interface</h1>
-                <div class="info">
-                    <p>This is the SkynetV2 web interface MVP. To view guild status:</p>
-                    <pre>1. Generate a token: [p]ai web token generate
-2. Visit: /status/{guild_id}?token={your_token}</pre>
-                </div>
-                <p>Available endpoints:</p>
-                <ul>
-                    <li><code>/status/{guild_id}?token={token}</code> - Guild status page</li>
-                </ul>
-            </div>
-        </body>
-        </html>
-        """
-        return web.Response(text=html, content_type='text/html')
         
     async def guild_status(self, request: web.Request):
         """Guild status page with authentication."""

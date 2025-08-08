@@ -46,6 +46,7 @@ Scopes and precedence: channel > guild > global. Secrets at global scope only.
 - autosearch_caps: { scrape_chars, depth, limit } (configured per guild)
   - Autosearch safety caps configurable via guild `autosearch_caps` (scrape_chars, with enforced depth<=3 and limit<=50 in execution). Set `autoscrape_single` true to auto-scrape when exactly one search result.
 - governance: { tools: {allow:[], deny:[]}, bypass: { cooldown_roles: [role_ids] }, budget: { per_user_daily_tokens:int, per_user_daily_cost_usd:float } }
+- prompts: mapping of prompt_name -> { content, variables[], created, updated, scope } (global + guild scopes; variables auto-extracted by regex `{{var}}`)
 
 ### Memory Pruning
 

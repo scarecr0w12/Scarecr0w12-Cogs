@@ -20,7 +20,7 @@ from .stats import StatsMixin
 from .listener import ListenerMixin
 from .orchestration import OrchestrationMixin
 from .error_handler import ErrorHandler
-from .web_oauth import WebInterface
+from .web.server import WebServer  # modular web server
 
 
 class SkynetV2(ToolsMixin, MemoryMixin, StatsMixin, ListenerMixin, OrchestrationMixin, commands.Cog):
@@ -39,7 +39,7 @@ class SkynetV2(ToolsMixin, MemoryMixin, StatsMixin, ListenerMixin, Orchestration
         # Initialize orchestration system
         self._init_orchestration()
         # Initialize web interface
-        self.web = WebInterface(self)
+        self.web = WebServer(self)  # replaced legacy WebInterface with modular WebServer
 
     # ----------------
     # Provider resolution & models

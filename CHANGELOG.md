@@ -13,6 +13,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Fixed
 - (placeholder)
 
+## [1.3.0] - 2025-08-08
+
+### Added
+- Prompt templates web module: CRUD pages (`/prompts`, `/prompts/new`, `/prompts/{name}`, `/prompts/{name}/generate`) with variable extraction and generation preview (global + guild scope)
+
+### Changed
+- Modular web interface now registers prompts module (non-fatal load)
+
+### Fixed
+- (none)
+
 ## [1.2.0] - 2025-08-08
 
 ### Added

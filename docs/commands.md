@@ -203,3 +203,7 @@ Simulate a tool call for debugging (requires orchestrate_debug permission).
 - Returns simulated execution result with call details
 - Example: `[p]ai orch sim websearch {"query": "test search"}`
 - Used for development and testing tool call structures
+
+## Prompt Templates (Web Only)
+
+Management currently via web dashboard (`/prompts`). Future CLI/Discord commands may expose list/fill/generate functions.

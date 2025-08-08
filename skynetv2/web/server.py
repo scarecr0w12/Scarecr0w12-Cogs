@@ -1,0 +1,30 @@
+"""Web server wrapper exposing start/stop used by cog.
+Bridges to modular webapp WebInterface implementation.
+"""
+from __future__ import annotations
+from typing import Optional, Any
+
+try:
+    from ..webapp.interface import WebInterface
+except Exception:  # fallback if module not present
+    WebInterface = None  # type: ignore
+
+class WebServer:
+    def __init__(self, cog):
+        self.cog = cog
+        impl_cls: Any = WebInterface  # type: ignore
+        self._impl = impl_cls(cog) if impl_cls else None
+
+    async def start(self):
+        if self._impl:
+            await self._impl.start_server()
+
+    async def stop(self):
+        if self._impl:
+            await self._impl.stop_server()
+
+    # Optional passthrough for status helper if needed elsewhere
+    async def get_guild_status(self, guild):  # type: ignore
+        if self._impl and hasattr(self._impl, 'get_guild_status'):
+            return await self._impl.get_guild_status(guild)
+        return {}

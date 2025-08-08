@@ -30,6 +30,8 @@ def register_config(cog) -> Config:
         "web_host": "localhost",
         "web_port": 8080,
         "web_session_key": None,  # Auto-generated encryption key
+        # Prompt templates (global scope): name -> {content:str, variables:list[str], created:int, updated:int, scope:'global'}
+        "prompts": {},
     }
 
     default_guild = {
@@ -68,6 +70,8 @@ def register_config(cog) -> Config:
         "stretch": {"truncation": {"enabled": True, "max_tool_output_chars": 8000}, "cache": {"enabled": False, "max_entries": 1000, "ttl_hours": 1}, "experimental": {"chain_planning": False, "localization": False}},
         # Web interface authentication tokens
         "web_tokens": {},
+        # Prompt templates (guild scope): name -> {content:str, variables:list[str], created:int, updated:int, scope:'guild'}
+        "prompts": {},
     }
 
     conf.register_global(**default_global)

@@ -56,6 +56,7 @@ Core components (current implementation)
 - **Governance System**: Rate limiting, tool access control, daily budgets, bypass roles
 - **Telemetry** (`stats.py`): Usage tracking, latency metrics, success rates, cost estimation
 - **Documentation** (`docs/*`): Commands, configuration, architecture, roadmap, testing guides
+- **Web Modules** (`webapp/`): auth (OAuth2), pages (dashboard/config), api (JSON endpoints), legacy (token status), prompts (template CRUD + generation)
 
 Key flows
 

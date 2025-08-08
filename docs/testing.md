@@ -164,6 +164,12 @@ SkynetV2 uses a layered testing approach combining automated unit tests, integra
 | **All Mode** | Enable all mode (carefully!) | Bot responds to all messages | ⏳ |
 | **Rate Limit Respect** | Rapid messages with listening on | Rate limits still enforced | ⏳ |
 
+### Prompt Templates
+- CRUD operations via web UI (global + guild)
+- Variable extraction correctness (`{{var}}` pattern)
+- Generation preview substitution accuracy (missing vars remain templated)
+- Guild permission isolation (guild admin vs non-admin)
+
 ## Automated Testing
 
 ### Classification Heuristics Tests

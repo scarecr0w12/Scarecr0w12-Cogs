@@ -74,12 +74,18 @@ class WebInterface:
         
         # Final validation before use
         try:
-            self.session_key = key.encode()
+            # EncryptedCookieStorage expects bytes, so convert string key to bytes
+            if isinstance(key, str):
+                self.session_key = key.encode()
+            else:
+                self.session_key = key
+                
+            # Test that it works with Fernet
             test_storage = fernet.Fernet(self.session_key)
             print("SkynetV2 Web: Session key validated for middleware setup.")
         except Exception as e:
             print(f"SkynetV2 Web: Final session key validation failed: {e}")
-            # Generate emergency fallback key
+            # Generate emergency fallback key (already bytes)
             self.session_key = fernet.Fernet.generate_key()
             print("SkynetV2 Web: Using emergency ephemeral session key.")
         

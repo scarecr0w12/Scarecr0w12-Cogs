@@ -23,6 +23,13 @@ class WebServer:
         if self._impl:
             await self._impl.stop_server()
 
+    # Backwards compatibility aliases (original code expected start_server/stop_server on self.web)
+    async def start_server(self):  # called by existing cog code
+        await self.start()
+
+    async def stop_server(self):  # called by existing cog code
+        await self.stop()
+
     # Optional passthrough for status helper if needed elsewhere
     async def get_guild_status(self, guild):  # type: ignore
         if self._impl and hasattr(self._impl, 'get_guild_status'):

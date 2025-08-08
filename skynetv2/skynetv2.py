@@ -176,30 +176,30 @@ class SkynetV2(ToolsMixin, MemoryMixin, StatsMixin, ListenerMixin, Orchestration
         if policy_err:
             await ctx.send(policy_err)
             return
-        await ctx.trigger_typing()
-        base = await self._memory_build_context(ctx.guild, ctx.channel.id)
-        chunks = []
-        async for chunk in provider.chat(model=model_name, messages=base + [ChatMessage("user", message)]):
-            chunks.append(chunk)
-        text = "".join(chunks) or "(no output)"
-        last_usage = getattr(provider, "get_last_usage", lambda: None)()
-        if last_usage:
-            epoch_now = int(time.time())
-            async with self.config.guild(ctx.guild).usage() as usage:
-                t = usage.setdefault("tokens", {"prompt": 0, "completion": 0, "total": 0})
-                t["prompt"] = int(t.get("prompt", 0)) + int(last_usage.get("prompt", 0))
-                t["completion"] = int(t.get("completion", 0)) + int(last_usage.get("completion", 0))
-                t["total"] = int(t.get("total", 0)) + int(last_usage.get("total", 0))
-                pu = usage.setdefault("per_user", {})
-                pc = usage.setdefault("per_channel", {})
-                u = pu.setdefault(str(ctx.author.id), {"last_used": 0, "count_1m": 0, "window_start": int(time.time()), "total": 0, "tokens_total": 0})
-                pc.setdefault(str(ctx.channel.id), {"count_1m": 0, "window_start": int(time.time()), "total": 0, "tokens_total": 0})
-                u["tokens_total"] = int(u.get("tokens_total", 0)) + int(last_usage.get("total", 0))
-                # Daily token tracking (epoch based)
-                if epoch_now - int(u.get("tokens_day_start", epoch_now)) >= 86400:
-                    u["tokens_day_start"], u["tokens_day_total"] = epoch_now, 0
-                u["tokens_day_total"] = int(u.get("tokens_day_total", 0)) + int(last_usage.get("total", 0))
-        await self._memory_remember(ctx.guild, ctx.channel.id, message, text)
+        async with ctx.typing():
+            base = await self._memory_build_context(ctx.guild, ctx.channel.id)
+            chunks = []
+            async for chunk in provider.chat(model=model_name, messages=base + [ChatMessage("user", message)]):
+                chunks.append(chunk)
+            text = "".join(chunks) or "(no output)"
+            last_usage = getattr(provider, "get_last_usage", lambda: None)()
+            if last_usage:
+                epoch_now = int(time.time())
+                async with self.config.guild(ctx.guild).usage() as usage:
+                    t = usage.setdefault("tokens", {"prompt": 0, "completion": 0, "total": 0})
+                    t["prompt"] = int(t.get("prompt", 0)) + int(last_usage.get("prompt", 0))
+                    t["completion"] = int(t.get("completion", 0)) + int(last_usage.get("completion", 0))
+                    t["total"] = int(t.get("total", 0)) + int(last_usage.get("total", 0))
+                    pu = usage.setdefault("per_user", {})
+                    pc = usage.setdefault("per_channel", {})
+                    u = pu.setdefault(str(ctx.author.id), {"last_used": 0, "count_1m": 0, "window_start": int(time.time()), "total": 0, "tokens_total": 0})
+                    pc.setdefault(str(ctx.channel.id), {"count_1m": 0, "window_start": int(time.time()), "total": 0, "tokens_total": 0})
+                    u["tokens_total"] = int(u.get("tokens_total", 0)) + int(last_usage.get("total", 0))
+                    # Daily token tracking (epoch based)
+                    if epoch_now - int(u.get("tokens_day_start", epoch_now)) >= 86400:
+                        u["tokens_day_start"], u["tokens_day_total"] = epoch_now, 0
+                    u["tokens_day_total"] = int(u.get("tokens_day_total", 0)) + int(last_usage.get("total", 0))
+            await self._memory_remember(ctx.guild, ctx.channel.id, message, text)
         await ctx.send(text[:2000])
 
     @ai_group.command(name="chatstream")

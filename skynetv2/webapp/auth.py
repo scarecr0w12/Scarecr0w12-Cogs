@@ -6,11 +6,19 @@ from urllib.parse import urlencode
 import secrets
 from typing import Dict, Any, List
 
-async def get_user_permissions(webiface: 'WebInterface', user_info: Dict, user_guilds: List[Dict]) -> Dict[str, Any]:
+# Import the HTML template function from pages module
+def _html_base(title: str, body: str) -> str:
+    """HTML template with consistent styling"""
+    BASE_STYLE = "body{font-family:Segoe UI,Arial,sans-serif;margin:20px;background:#f5f7fb;color:#222}a{color:#3366cc;text-decoration:none}nav a{margin-right:12px}.card{background:#fff;padding:16px;border-radius:8px;box-shadow:0 2px 6px rgba(0,0,0,0.06);margin:12px 0}table{border-collapse:collapse;width:100%}th,td{text-align:left;padding:6px 8px;border-bottom:1px solid #eee;font-size:14px}th{background:#fafafa}code{background:#eef;padding:2px 4px;border-radius:4px;font-size:90%}"
+    return f"<!DOCTYPE html><html><head><meta charset='utf-8'><title>{title}</title><style>{BASE_STYLE}</style></head><body>{body}</body></html>"
+
+async def get_user_permissions(webiface: Any, user_info: Dict, user_guilds: List[Dict]) -> Dict[str, Any]:
     user_id = int(user_info['id'])
     permissions = {'bot_owner': False,'guild_admin': [],'guild_member': [],'guilds': []}
     app_info = await webiface.cog.bot.application_info()
+    print(f"SkynetV2 Web: Bot owner check - user: {user_id}, bot owner: {app_info.owner.id}")
     if user_id == app_info.owner.id:
+        print("SkynetV2 Web: User is bot owner - granting full access")
         permissions['bot_owner'] = True
         bot_guilds = [str(g.id) for g in webiface.cog.bot.guilds]
         permissions['guilds'] = bot_guilds
@@ -32,8 +40,19 @@ async def index(request: web.Request):
     session = await get_session(request)
     if session.get('user'):
         return web.HTTPFound('/dashboard')
-    # kept minimal, could be imported from legacy
-    return web.Response(text="<html><body><h1>SkynetV2</h1><a href='/login'>Login with Discord</a></body></html>", content_type='text/html')
+    # Use styled template from pages module
+    body = """
+    <div class='card'>
+        <h1>SkynetV2 Web Interface</h1>
+        <p>Welcome to the SkynetV2 web interface. Please log in with your Discord account to continue.</p>
+        <div style='text-align: center; margin-top: 20px;'>
+            <a href='/login' style='background: #5865F2; color: white; padding: 12px 24px; border-radius: 6px; text-decoration: none; font-weight: 500;'>
+                🔗 Login with Discord
+            </a>
+        </div>
+    </div>
+    """
+    return web.Response(text=_html_base('SkynetV2 Login', body), content_type='text/html')
 
 async def login(request: web.Request):
     webiface = request.app['webiface']
@@ -85,13 +104,17 @@ async def oauth_callback(request: web.Request):
     permissions = await get_user_permissions(webiface, user_info, user_guilds)
     print(f"SkynetV2 Web: User permissions: {permissions}")
     session['user'] = {'id': user_info['id'],'username': user_info['username'],'discriminator': user_info.get('discriminator','0000'),'avatar': user_info.get('avatar'),'permissions': permissions,'guilds': [g for g in user_guilds if str(g['id']) in permissions.get('guilds', [])]}
+    
+    # Ensure session is properly saved before redirect
+    print(f"SkynetV2 Web: Session data set - verifying: {session.get('user', {}).get('username', 'NOT_FOUND')}")
+    session.changed()  # Force session save
     print(f"SkynetV2 Web: OAuth callback successful - redirecting to dashboard")
     return web.HTTPFound('/dashboard')
 
 async def logout(request: web.Request):
     session = await get_session(request); session.clear(); return web.HTTPFound('/')
 
-def setup(webiface: 'WebInterface'):
+def setup(webiface: Any):
     app = webiface.app
     app['webiface'] = webiface
     app.router.add_get('/', index)

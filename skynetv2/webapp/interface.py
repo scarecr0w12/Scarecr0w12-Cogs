@@ -112,7 +112,14 @@ class WebInterface:  # Partial; only startup + shared existing methods moved gra
         # Session storage setup (key validation already done in _ensure_valid_session_key)
         try:
             print(f"SkynetV2 Web: Setting up session storage with key type {type(self.session_key)}.")
-            setup(self.app, EncryptedCookieStorage(self.session_key, max_age=86400))
+            # Use compressed cookie storage with smaller max_age to reduce cookie size
+            setup(self.app, EncryptedCookieStorage(
+                self.session_key, 
+                max_age=3600,  # 1 hour instead of 24 to reduce data accumulation
+                cookie_name='skynet_session',
+                httponly=True,
+                secure=True if self.public_url.startswith('https') else False
+            ))
             print("SkynetV2 Web: Session middleware setup successful.")
         except Exception as e:
             print(f"SkynetV2 Web: Session middleware setup failed: {e}")

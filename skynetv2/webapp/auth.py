@@ -14,26 +14,28 @@ def _html_base(title: str, body: str) -> str:
 
 async def get_user_permissions(webiface: Any, user_info: Dict, user_guilds: List[Dict]) -> Dict[str, Any]:
     user_id = int(user_info['id'])
-    permissions = {'bot_owner': False,'guild_admin': [],'guild_member': [],'guilds': []}
+    permissions = {'bot_owner': False,'guild_admin': set(),'guild_member': set(),'guilds': set()}
     app_info = await webiface.cog.bot.application_info()
     print(f"SkynetV2 Web: Bot owner check - user: {user_id}, bot owner: {app_info.owner.id}")
     if user_id == app_info.owner.id:
         print("SkynetV2 Web: User is bot owner - granting full access")
         permissions['bot_owner'] = True
-        bot_guilds = [str(g.id) for g in webiface.cog.bot.guilds]
-        permissions['guilds'] = bot_guilds
-        permissions['guild_admin'] = bot_guilds
+        # For bot owners, store only first 50 guilds to avoid cookie size limits
+        bot_guild_ids = [str(g.id) for g in list(webiface.cog.bot.guilds)[:50]]
+        permissions['guilds'] = set(bot_guild_ids)
+        permissions['guild_admin'] = set(bot_guild_ids)
         return permissions
     bot_guild_ids = {g.id for g in webiface.cog.bot.guilds}
     for guild_info in user_guilds:
         gid = guild_info['id']
         if int(gid) not in bot_guild_ids:
             continue
-        permissions['guilds'].append(str(gid))
-        permissions['guild_member'].append(str(gid))
+        permissions['guilds'].add(str(gid))
+        permissions['guild_member'].add(str(gid))
         if guild_info.get('permissions', 0) & 0x00000020:
-            permissions['guild_admin'].append(str(gid))
-    return permissions
+            permissions['guild_admin'].add(str(gid))
+    # Convert sets to lists for JSON serialization
+    return {k: list(v) if isinstance(v, set) else v for k, v in permissions.items()}
 
 async def index(request: web.Request):
     webiface = request.app['webiface']
@@ -103,7 +105,24 @@ async def oauth_callback(request: web.Request):
         return web.Response(text='OAuth2 error occurred. Please try again later.', status=500)
     permissions = await get_user_permissions(webiface, user_info, user_guilds)
     print(f"SkynetV2 Web: User permissions: {permissions}")
-    session['user'] = {'id': user_info['id'],'username': user_info['username'],'discriminator': user_info.get('discriminator','0000'),'avatar': user_info.get('avatar'),'permissions': permissions,'guilds': [g for g in user_guilds if str(g['id']) in permissions.get('guilds', [])]}
+    
+    # Store minimal session data to avoid cookie size limits
+    session_user_data = {
+        'id': user_info['id'],
+        'username': user_info['username'],
+        'discriminator': user_info.get('discriminator','0000'),
+        'avatar': user_info.get('avatar'),
+        'permissions': permissions
+        # Note: Full guild data not stored in session to keep cookie size manageable
+        # Guild data can be fetched from bot.guilds when needed
+    }
+    
+    # Debug: Check session data size
+    import json
+    session_size = len(json.dumps(session_user_data))
+    print(f"SkynetV2 Web: Session data size: {session_size} bytes")
+    
+    session['user'] = session_user_data
     
     # Ensure session is properly saved before redirect
     print(f"SkynetV2 Web: Session data set - verifying: {session.get('user', {}).get('username', 'NOT_FOUND')}")

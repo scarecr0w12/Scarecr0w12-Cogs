@@ -302,14 +302,14 @@ async def guild_dashboard(request: web.Request):
             <div class='form-group'>
                 <div class='form-row'>
                     <label>Enable/Disable Bot:</label>
-                    <div class='toggle {"on" if enabled else ""}' onclick='toggleSetting({guild_id_for_js}, "enabled", {str(not enabled).lower()})'></div>
+                    <div class='toggle {"on" if enabled else ""}' onclick='toggleSetting("{guild_id_for_js}", "enabled", {str(not enabled).lower()})'></div>
                     <span class='status-badge status-{status_color}'>{status_color.title()}</span>
                 </div>
             </div>
             <div class='form-group'>
                 <div class='form-row'>
                     <label>Passive Listening:</label>
-                    <div class='toggle {"on" if listening_config.get("enabled") else ""}' onclick='toggleSetting({guild_id_for_js}, "listening_enabled", {str(not listening_config.get("enabled", False)).lower()})'></div>
+                    <div class='toggle {"on" if listening_config.get("enabled") else ""}' onclick='toggleSetting("{guild_id_for_js}", "listening_enabled", {str(not listening_config.get("enabled", False)).lower()})'></div>
                     <span class='status-badge status-{listening_status}'>{listening_status.title()}</span>
                 </div>
             </div>
@@ -325,7 +325,7 @@ async def guild_dashboard(request: web.Request):
             tools_html += f"""
                 <div class='form-row'>
                     <label>{tool.replace('_', ' ').title()}:</label>
-                    <div class='toggle {"on" if tool_enabled else ""}' onclick='toggleSetting({guild_id_for_js}, "tool_{tool}", {str(not tool_enabled).lower()})'></div>
+                    <div class='toggle {"on" if tool_enabled else ""}' onclick='toggleSetting("{guild_id_for_js}", "tool_{tool}", {str(not tool_enabled).lower()})'></div>
                     <span class='status-badge status-{tool_status}'>{tool_status.title()}</span>
                 </div>
             """
@@ -1810,11 +1810,15 @@ def _html_base(title: str, body: str, current_page: str = '') -> str:
         console.log('DEBUG toggleSetting: guildId parameter =', guildId, 'type =', typeof guildId);
         console.log('DEBUG toggleSetting: API URL will be', `/api/guild/${{guildId}}/toggle`);
         
+        // Ensure guildId is treated as string for large Discord IDs
+        const guildIdStr = String(guildId);
+        console.log('DEBUG toggleSetting: Using guildIdStr =', guildIdStr);
+        
         const btn = event.target;
         btn.disabled = true;
         btn.innerHTML = '<div class="loading"></div> Saving...';
         
-        fetch(`/api/guild/${{guildId}}/toggle`, {{
+        fetch(`/api/guild/${{guildIdStr}}/toggle`, {{
             method: 'POST',
             headers: {{'Content-Type': 'application/json'}},
             body: JSON.stringify({{setting: setting, value: value}})
@@ -2483,6 +2487,21 @@ def setup(webiface):
     app.router.add_get('/usage/{guild_id}', guild_usage)
     app.router.add_get('/test/{guild_id}', guild_test)
     
+    # API endpoints for form submissions
+    app.router.add_get('/api/debug/bot', debug_bot_status)
+    app.router.add_post('/api/guild/{guild_id}/toggle', handle_toggle)
+    app.router.add_get('/api/guild/{guild_id}/debug', debug_guild_id)
+    app.router.add_post('/api/guild/{guild_id}/config/providers', handle_providers_config)
+    app.router.add_post('/api/guild/{guild_id}/config/model', handle_model_config)
+    app.router.add_post('/api/guild/{guild_id}/config/params', handle_params_config)
+    app.router.add_post('/api/guild/{guild_id}/config/rate_limits', handle_rate_limits_config)
+    app.router.add_post('/api/guild/{guild_id}/config/listening', handle_listening_config)
+    app.router.add_post('/api/guild/{guild_id}/channel/{channel_id}/config', handle_channel_config)
+    app.router.add_post('/api/guild/{guild_id}/channel/{channel_id}/reset', handle_channel_reset)
+    app.router.add_post('/api/guild/{guild_id}/prompts/guild', handle_guild_prompt)
+    app.router.add_post('/api/guild/{guild_id}/prompts/member/{member_id}', handle_member_prompt)
+    app.router.add_get('/api/guild/{guild_id}/members/search', handle_member_search)
+
 async def debug_bot_status(request: web.Request):
     """Debug endpoint to check bot status"""
     webiface = request.app['webiface']
@@ -2499,42 +2518,26 @@ async def debug_bot_status(request: web.Request):
     except Exception as e:
         return web.json_response({'error': str(e)})
 
-# Add API endpoints for form submissions
-    app.router.add_get('/api/debug/bot', debug_bot_status)
-    app.router.add_post('/api/guild/{guild_id}/toggle', handle_toggle)
-    
-    # Debug endpoint to test URL parsing
-    async def debug_guild_id(request: web.Request):
-        """Debug endpoint to test guild ID parsing from URL"""
-        try:
-            raw_guild_id = request.match_info['guild_id']
-            parsed_gid = int(raw_guild_id)
-            
-            webiface = request.app['webiface']
-            guild = webiface.cog.bot.get_guild(parsed_gid)
-            
-            debug_info = {
-                'raw_guild_id': raw_guild_id,
-                'parsed_guild_id': parsed_gid,
-                'url_path': request.path,
-                'match_info': dict(request.match_info),
-                'guild_found': guild is not None,
-                'guild_name': guild.name if guild else None,
-                'bot_guilds': [(g.id, g.name) for g in webiface.cog.bot.guilds]
-            }
-            
-            return web.json_response(debug_info)
-        except Exception as e:
-            return web.json_response({'error': str(e)})
-    
-    app.router.add_get('/api/guild/{guild_id}/debug', debug_guild_id)
-    app.router.add_post('/api/guild/{guild_id}/config/providers', handle_providers_config)
-    app.router.add_post('/api/guild/{guild_id}/config/model', handle_model_config)
-    app.router.add_post('/api/guild/{guild_id}/config/params', handle_params_config)
-    app.router.add_post('/api/guild/{guild_id}/config/rate_limits', handle_rate_limits_config)
-    app.router.add_post('/api/guild/{guild_id}/config/listening', handle_listening_config)
-    app.router.add_post('/api/guild/{guild_id}/channel/{channel_id}/config', handle_channel_config)
-    app.router.add_post('/api/guild/{guild_id}/channel/{channel_id}/reset', handle_channel_reset)
-    app.router.add_post('/api/guild/{guild_id}/prompts/guild', handle_guild_prompt)
-    app.router.add_post('/api/guild/{guild_id}/prompts/member/{member_id}', handle_member_prompt)
-    app.router.add_get('/api/guild/{guild_id}/members/search', handle_member_search)
+# Debug endpoint to test URL parsing
+async def debug_guild_id(request: web.Request):
+    """Debug endpoint to test guild ID parsing from URL"""
+    try:
+        raw_guild_id = request.match_info['guild_id']
+        parsed_gid = int(raw_guild_id)
+        
+        webiface = request.app['webiface']
+        guild = webiface.cog.bot.get_guild(parsed_gid)
+        
+        debug_info = {
+            'raw_guild_id': raw_guild_id,
+            'parsed_guild_id': parsed_gid,
+            'url_path': request.path,
+            'match_info': dict(request.match_info),
+            'guild_found': guild is not None,
+            'guild_name': guild.name if guild else None,
+            'bot_guilds': [(g.id, g.name) for g in webiface.cog.bot.guilds]
+        }
+        
+        return web.json_response(debug_info)
+    except Exception as e:
+        return web.json_response({'error': str(e)})

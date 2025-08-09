@@ -1382,7 +1382,13 @@ class SkynetV2(ToolsMixin, MemoryMixin, StatsMixin, ListenerMixin, Orchestration
     @app_commands.describe(channel="Channel to enable (default: current channel)")
     @app_commands.checks.has_permissions(manage_guild=True)
     async def slash_channel_listening_enable(self, interaction: discord.Interaction, channel: Optional[discord.TextChannel] = None):
-        assert interaction.guild is not None
+        if interaction.guild is None:
+            await interaction.response.send_message(ResponseFormatter.format_error(
+                "Guild Not Found", 
+                "This command must be used within a server.",
+                "Please run this command from a channel in the server you want to configure."
+            ), ephemeral=True)
+            return
         
         target_channel: discord.TextChannel
         if channel is None:
@@ -1410,7 +1416,13 @@ class SkynetV2(ToolsMixin, MemoryMixin, StatsMixin, ListenerMixin, Orchestration
     @app_commands.describe(channel="Channel to disable (default: current channel)")
     @app_commands.checks.has_permissions(manage_guild=True)
     async def slash_channel_listening_disable(self, interaction: discord.Interaction, channel: Optional[discord.TextChannel] = None):
-        assert interaction.guild is not None
+        if interaction.guild is None:
+            await interaction.response.send_message(ResponseFormatter.format_error(
+                "Guild Not Found", 
+                "This command must be used within a server.",
+                "Please run this command from a channel in the server you want to configure."
+            ), ephemeral=True)
+            return
         
         target_channel: discord.TextChannel
         if channel is None:
@@ -1722,6 +1734,14 @@ class SkynetV2(ToolsMixin, MemoryMixin, StatsMixin, ListenerMixin, Orchestration
     @ai_channel_listening.command(name="enable")
     async def ai_channel_listening_enable(self, ctx: commands.Context, channel: discord.TextChannel = None):
         """Enable AI listening in a specific channel."""
+        if ctx.guild is None:
+            await ctx.send(ResponseFormatter.format_error(
+                "Guild Not Found", 
+                "This command must be used within a server.",
+                "Please run this command from a channel in the server you want to configure."
+            ))
+            return
+            
         if channel is None:
             channel = ctx.channel
         
@@ -1741,6 +1761,14 @@ class SkynetV2(ToolsMixin, MemoryMixin, StatsMixin, ListenerMixin, Orchestration
     @ai_channel_listening.command(name="disable")
     async def ai_channel_listening_disable(self, ctx: commands.Context, channel: discord.TextChannel = None):
         """Disable AI listening in a specific channel."""
+        if ctx.guild is None:
+            await ctx.send(ResponseFormatter.format_error(
+                "Guild Not Found", 
+                "This command must be used within a server.",
+                "Please run this command from a channel in the server you want to configure."
+            ))
+            return
+            
         if channel is None:
             channel = ctx.channel
         
@@ -1763,6 +1791,14 @@ class SkynetV2(ToolsMixin, MemoryMixin, StatsMixin, ListenerMixin, Orchestration
     @ai_channel_mode.command(name="set")
     async def ai_channel_mode_set(self, ctx: commands.Context, mode: str, channel: discord.TextChannel = None):
         """Set listening mode for a channel (mention, keyword, all)."""
+        if ctx.guild is None:
+            await ctx.send(ResponseFormatter.format_error(
+                "Guild Not Found", 
+                "This command must be used within a server.",
+                "Please run this command from a channel in the server you want to configure."
+            ))
+            return
+            
         if channel is None:
             channel = ctx.channel
         
@@ -1799,6 +1835,14 @@ class SkynetV2(ToolsMixin, MemoryMixin, StatsMixin, ListenerMixin, Orchestration
     @ai_channel_keywords.command(name="set")
     async def ai_channel_keywords_set(self, ctx: commands.Context, keywords: str, channel: discord.TextChannel = None):
         """Set keywords for channel listening (comma-separated)."""
+        if ctx.guild is None:
+            await ctx.send(ResponseFormatter.format_error(
+                "Guild Not Found", 
+                "This command must be used within a server.",
+                "Please run this command from a channel in the server you want to configure."
+            ))
+            return
+            
         if channel is None:
             channel = ctx.channel
         
@@ -1828,6 +1872,14 @@ class SkynetV2(ToolsMixin, MemoryMixin, StatsMixin, ListenerMixin, Orchestration
     @ai_channel_keywords.command(name="show")
     async def ai_channel_keywords_show(self, ctx: commands.Context, channel: discord.TextChannel = None):
         """Show current keywords for a channel."""
+        if ctx.guild is None:
+            await ctx.send(ResponseFormatter.format_error(
+                "Guild Not Found", 
+                "This command must be used within a server.",
+                "Please run this command from a channel in the server you want to configure."
+            ))
+            return
+            
         if channel is None:
             channel = ctx.channel
         
@@ -1846,6 +1898,14 @@ class SkynetV2(ToolsMixin, MemoryMixin, StatsMixin, ListenerMixin, Orchestration
     @ai_channel.command(name="status")
     async def ai_channel_status(self, ctx: commands.Context, channel: discord.TextChannel = None):
         """Show current channel listening configuration."""
+        if ctx.guild is None:
+            await ctx.send(ResponseFormatter.format_error(
+                "Guild Not Found", 
+                "This command must be used within a server.",
+                "Please run this command from a channel in the server you want to configure."
+            ))
+            return
+            
         if channel is None:
             channel = ctx.channel
         

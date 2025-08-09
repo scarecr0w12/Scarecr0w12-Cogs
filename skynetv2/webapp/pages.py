@@ -1223,18 +1223,29 @@ async def handle_toggle(request: web.Request):
     
     try:
         gid = int(request.match_info['guild_id'])
+        print(f"SkynetV2 Web: Toggle request for guild {gid}")
+        
         guild = webiface.cog.bot.get_guild(gid)
         if not guild:
-            return web.json_response({'success': False, 'error': 'Guild not found'})
+            # Enhanced debugging for guild not found
+            all_guilds = [g.id for g in webiface.cog.bot.guilds]
+            print(f"SkynetV2 Web: Guild {gid} not found. Bot is in guilds: {all_guilds}")
+            print(f"SkynetV2 Web: User permissions: {user.get('permissions', {})}")
+            return web.json_response({'success': False, 'error': f'Guild not found. Bot may not be in guild {gid} or guild may be temporarily unavailable.'})
+        
+        print(f"SkynetV2 Web: Toggle request for guild {guild.name} ({gid})")
         
         # Check permissions
         is_admin = str(gid) in user.get('permissions', {}).get('guild_admin', []) or user.get('permissions', {}).get('bot_owner')
         if not is_admin:
+            print(f"SkynetV2 Web: Access denied for guild {gid} - user not admin")
             return web.json_response({'success': False, 'error': 'Admin access required'})
         
         data = await request.json()
         setting = data.get('setting')
         value = data.get('value')
+        
+        print(f"SkynetV2 Web: Toggling {setting} to {value} for guild {gid}")
         
         config = webiface.cog.config.guild(guild)
         
@@ -1243,6 +1254,7 @@ async def handle_toggle(request: web.Request):
         elif setting == 'listening_enabled':
             async with config.listening() as listening:
                 listening['enabled'] = value
+            print(f"SkynetV2 Web: Successfully set listening_enabled to {value} for guild {gid}")
         elif setting.startswith('tool_'):
             tool_name = setting[5:]  # Remove 'tool_' prefix
             async with config.tools() as tools:
@@ -1250,10 +1262,13 @@ async def handle_toggle(request: web.Request):
                     tools['enabled'] = {}
                 tools['enabled'][tool_name] = value
         else:
+            print(f"SkynetV2 Web: Unknown setting: {setting}")
             return web.json_response({'success': False, 'error': f'Unknown setting: {setting}'})
         
+        print(f"SkynetV2 Web: Toggle successful for {setting} = {value} in guild {gid}")
         return web.json_response({'success': True})
     except Exception as e:
+        print(f"SkynetV2 Web: Toggle error for guild {gid}: {str(e)}")
         return web.json_response({'success': False, 'error': str(e)})
 
 async def handle_providers_config(request: web.Request):

@@ -189,6 +189,20 @@ Always include **practical examples** and **actionable information**.""",
             "ignore_short_messages": True,  # ignore messages under 10 characters in all mode
             "require_question_or_keyword": False  # if True, only respond to questions or keyword matches
         },
+        # Auto web search integration - automatically searches for current information when needed
+        "auto_web_search": {
+            "enabled": False,  # Start disabled for safety
+            "sensitivity": 3,  # 1=very aggressive, 5=very conservative
+            "max_results": 5,  # Limit search results to prevent context overflow
+            "timeout_seconds": 15,  # Max time for search operations
+            "trigger_keywords": [],  # Custom trigger words/phrases
+            "exclude_patterns": [],  # Patterns to avoid searching
+            "min_message_length": 10,  # Don't search very short messages
+            "cooldown_seconds": 60,  # Cooldown between auto searches per user
+            "allowed_commands": ["chat", "chatstream"],  # Commands that can trigger auto search
+            "allowed_modes": ["mention", "keyword", "all"],  # Listening modes that can trigger auto search
+            "max_per_hour": 30,  # Guild-wide limit on auto searches per hour
+        },
         "tools": {"enabled": {}},
         # Added pruning policy (max_items hard cap across messages list; max_age_days age trimming on write)
         "memory": {"default_limit": 10, "per_channel": {}, "prune": {"max_items": 400, "max_age_days": 30}},

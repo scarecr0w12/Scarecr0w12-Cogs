@@ -413,6 +413,8 @@ async def guild_config(request: web.Request):
     params_cfg = await config.params()
     listening_cfg = await config.listening()
     autosearch_caps = await config.autosearch_caps()
+    smart_replies_cfg = await config.smart_replies()
+    auto_web_search_cfg = await config.auto_web_search()
     
     # Provider configuration form
     providers_form = """
@@ -591,6 +593,66 @@ async def guild_config(request: web.Request):
     </div>
     """
     
+    # Smart replies configuration
+    smart_replies_form = f"""
+    <div class='card'>
+        <h2>Smart Replies</h2>
+        <p>Intelligent response control for 'all' mode to avoid interrupting human conversations.</p>
+        <form id='smart-replies-form' action='/api/guild/{gid}/config/smart_replies' method='POST'>
+            <div class='form-group'>
+                <label for='smart_replies_enabled'>Enable Smart Replies:</label>
+                <input type='checkbox' id='smart_replies_enabled' name='enabled' {'checked' if smart_replies_cfg.get("enabled", True) else ''} />
+            </div>
+            <div class='form-group'>
+                <label for='smart_replies_sensitivity'>Sensitivity (1=very responsive, 5=very conservative):</label>
+                <input type='range' id='smart_replies_sensitivity' name='sensitivity' min='1' max='5' value='{smart_replies_cfg.get("sensitivity", 3)}' />
+                <span id='sensitivity-value'>{smart_replies_cfg.get("sensitivity", 3)}</span>
+            </div>
+            <div class='form-group'>
+                <label for='smart_replies_quiet_time'>Quiet Time (seconds):</label>
+                <input type='number' id='smart_replies_quiet_time' name='quiet_time_seconds' value='{smart_replies_cfg.get("quiet_time_seconds", 300)}' />
+            </div>
+            <button type='button' onclick='submitForm("smart-replies-form")'>Save Smart Replies Settings</button>
+        </form>
+    </div>
+    """
+    
+    # Auto web search configuration
+    auto_web_search_form = f"""
+    <div class='card'>
+        <h2>Auto Web Search</h2>
+        <p>Automatically search for current information when chat messages need up-to-date data.</p>
+        <form id='auto-web-search-form' action='/api/guild/{gid}/config/auto_web_search' method='POST'>
+            <div class='form-group'>
+                <label for='aws_enabled'>Enable Auto Web Search:</label>
+                <input type='checkbox' id='aws_enabled' name='enabled' {'checked' if auto_web_search_cfg.get("enabled", False) else ''} />
+            </div>
+            <div class='form-group'>
+                <label for='aws_sensitivity'>Sensitivity (1=very aggressive, 5=very conservative):</label>
+                <input type='range' id='aws_sensitivity' name='sensitivity' min='1' max='5' value='{auto_web_search_cfg.get("sensitivity", 3)}' />
+                <span id='aws-sensitivity-value'>{auto_web_search_cfg.get("sensitivity", 3)}</span>
+            </div>
+            <div class='form-group'>
+                <label for='aws_max_results'>Max Search Results:</label>
+                <input type='number' id='aws_max_results' name='max_results' min='1' max='10' value='{auto_web_search_cfg.get("max_results", 5)}' />
+            </div>
+            <div class='form-group'>
+                <label for='aws_timeout'>Search Timeout (seconds):</label>
+                <input type='number' id='aws_timeout' name='timeout_seconds' min='5' max='60' value='{auto_web_search_cfg.get("timeout_seconds", 15)}' />
+            </div>
+            <div class='form-group'>
+                <label for='aws_cooldown'>User Cooldown (seconds):</label>
+                <input type='number' id='aws_cooldown' name='cooldown_seconds' min='10' max='300' value='{auto_web_search_cfg.get("cooldown_seconds", 60)}' />
+            </div>
+            <div class='form-group'>
+                <label for='aws_min_length'>Minimum Message Length:</label>
+                <input type='number' id='aws_min_length' name='min_message_length' min='5' max='50' value='{auto_web_search_cfg.get("min_message_length", 10)}' />
+            </div>
+            <button type='button' onclick='submitForm("auto-web-search-form")'>Save Auto Web Search Settings</button>
+        </form>
+    </div>
+    """
+    
     body = f"""
     <h1>Configuration - {guild.name}</h1>
     <div style='margin-bottom: 20px;'>
@@ -602,6 +664,8 @@ async def guild_config(request: web.Request):
     {params_form}
     {rate_limits_form}
     {listening_form}
+    {smart_replies_form}
+    {auto_web_search_form}
     """
     
     return web.Response(text=_html_base('Guild Configuration', body), content_type='text/html')

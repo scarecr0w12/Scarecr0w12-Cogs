@@ -283,13 +283,75 @@ class SkynetV2(ToolsMixin, MemoryMixin, StatsMixin, ListenerMixin, Orchestration
             await ctx.send(policy_err)
             return
         async with ctx.typing():
+            # Initialize auto web search system
+            from .auto_web_search import AutoWebSearchIntegration, AutoSearchCooldownManager
+            if not hasattr(self, '_auto_search_integration'):
+                self._auto_search_integration = AutoWebSearchIntegration(self)
+            if not hasattr(self, '_auto_search_cooldowns'):
+                self._auto_search_cooldowns = AutoSearchCooldownManager()
+            
             base = await self._memory_build_context(ctx.guild, ctx.channel.id, ctx.author)
             
             # Resolve variables in the message
             resolved_message = await self.resolve_prompt_variables(message, ctx.guild, ctx.channel, ctx.author)
             
+            # Auto web search integration - check if we should search for current info
+            auto_search_config = await self.config.guild(ctx.guild).auto_web_search()
+            search_context = ""
+            
+            if auto_search_config.get('enabled', False):
+                # Check if command is allowed for auto search
+                if "chat" in auto_search_config.get('allowed_commands', ['chat', 'chatstream']):
+                    # Check user cooldown
+                    user_id = str(ctx.author.id)
+                    cooldown_seconds = auto_search_config.get('cooldown_seconds', 60)
+                    
+                    if self._auto_search_cooldowns.can_search(user_id, cooldown_seconds):
+                        # Check if message should trigger search
+                        should_search, search_reason = self._auto_search_integration.should_trigger_search(
+                            resolved_message, auto_search_config
+                        )
+                        
+                        if should_search:
+                            # Check message length requirement
+                            min_length = auto_search_config.get('min_message_length', 10)
+                            if len(resolved_message.strip()) >= min_length:
+                                try:
+                                    # Perform auto search
+                                    search_data = await self._auto_search_integration.perform_auto_search(
+                                        resolved_message, ctx.guild, auto_search_config
+                                    )
+                                    
+                                    if search_data:
+                                        # Format search results as context
+                                        search_context = self._auto_search_integration.format_search_context(
+                                            search_data, resolved_message
+                                        )
+                                        
+                                        # Record successful search for cooldown
+                                        self._auto_search_cooldowns.record_search(user_id)
+                                        
+                                        # Log auto search activity
+                                        self.logger.info(f"Auto web search triggered for user {ctx.author.id} in guild {ctx.guild.id}: {search_reason}")
+                                        
+                                except Exception as e:
+                                    # Log error but don't break chat
+                                    self.error_handler.log_error(e, "auto_web_search_chat", {
+                                        "user_id": ctx.author.id,
+                                        "guild_id": ctx.guild.id,
+                                        "message_preview": resolved_message[:100]
+                                    })
+            
+            # Add search context to the conversation if available
+            chat_messages = base.copy()
+            if search_context:
+                # Insert search context as a system message before the user message
+                chat_messages.append(ChatMessage("system", search_context))
+            
+            chat_messages.append(ChatMessage("user", resolved_message))
+            
             chunks = []
-            async for chunk in provider.chat(model=model_name, messages=base + [ChatMessage("user", resolved_message)]):
+            async for chunk in provider.chat(model=model_name, messages=chat_messages):
                 chunks.append(chunk)
             text = "".join(chunks) or "(no output)"
             last_usage = getattr(provider, "get_last_usage", lambda: None)()
@@ -343,12 +405,79 @@ class SkynetV2(ToolsMixin, MemoryMixin, StatsMixin, ListenerMixin, Orchestration
         except Exception as e:
             await ctx.send(f"Provider error: {e}")
             return
+            
+        # Initialize auto web search system
+        from .auto_web_search import AutoWebSearchIntegration, AutoSearchCooldownManager
+        if not hasattr(self, '_auto_search_integration'):
+            self._auto_search_integration = AutoWebSearchIntegration(self)
+        if not hasattr(self, '_auto_search_cooldowns'):
+            self._auto_search_cooldowns = AutoSearchCooldownManager()
+        
         base = await self._memory_build_context(ctx.guild, ctx.channel.id, ctx.author)
+        
+        # Resolve variables in the message
+        resolved_message = await self.resolve_prompt_variables(message, ctx.guild, ctx.channel, ctx.author)
+        
+        # Auto web search integration for chatstream
+        auto_search_config = await self.config.guild(ctx.guild).auto_web_search()
+        search_context = ""
+        
+        if auto_search_config.get('enabled', False):
+            # Check if command is allowed for auto search
+            if "chatstream" in auto_search_config.get('allowed_commands', ['chat', 'chatstream']):
+                # Check user cooldown
+                user_id = str(ctx.author.id)
+                cooldown_seconds = auto_search_config.get('cooldown_seconds', 60)
+                
+                if self._auto_search_cooldowns.can_search(user_id, cooldown_seconds):
+                    # Check if message should trigger search
+                    should_search, search_reason = self._auto_search_integration.should_trigger_search(
+                        resolved_message, auto_search_config
+                    )
+                    
+                    if should_search:
+                        # Check message length requirement
+                        min_length = auto_search_config.get('min_message_length', 10)
+                        if len(resolved_message.strip()) >= min_length:
+                            try:
+                                # Perform auto search
+                                search_data = await self._auto_search_integration.perform_auto_search(
+                                    resolved_message, ctx.guild, auto_search_config
+                                )
+                                
+                                if search_data:
+                                    # Format search results as context
+                                    search_context = self._auto_search_integration.format_search_context(
+                                        search_data, resolved_message
+                                    )
+                                    
+                                    # Record successful search for cooldown
+                                    self._auto_search_cooldowns.record_search(user_id)
+                                    
+                                    # Log auto search activity
+                                    self.logger.info(f"Auto web search triggered for chatstream user {ctx.author.id} in guild {ctx.guild.id}: {search_reason}")
+                                    
+                            except Exception as e:
+                                # Log error but don't break chat
+                                self.error_handler.log_error(e, "auto_web_search_chatstream", {
+                                    "user_id": ctx.author.id,
+                                    "guild_id": ctx.guild.id,
+                                    "message_preview": resolved_message[:100]
+                                })
+        
+        # Add search context to the conversation if available
+        chat_messages = base.copy()
+        if search_context:
+            # Insert search context as a system message before the user message
+            chat_messages.append(ChatMessage("system", search_context))
+        
+        chat_messages.append(ChatMessage("user", resolved_message))
+        
         msg = await ctx.send("…")
         buf = ""
         last_edit = 0.0
         try:
-            async for chunk in provider.chat(model=model_name, messages=base + [ChatMessage("user", message)], stream=True):
+            async for chunk in provider.chat(model=model_name, messages=chat_messages, stream=True):
                 if not chunk:
                     continue
                 buf += chunk
@@ -381,7 +510,7 @@ class SkynetV2(ToolsMixin, MemoryMixin, StatsMixin, ListenerMixin, Orchestration
                     u["tokens_day_start"], u["tokens_day_total"] = epoch_now, 0
                 u["tokens_day_total"] = int(u.get("tokens_day_total", 0)) + int(last_usage.get("total", 0))
             await self._estimate_and_record_cost(ctx.guild, provider_name, model_name, int(last_usage.get("prompt", 0)), int(last_usage.get("completion", 0)))
-        await self._memory_remember(ctx.guild, ctx.channel.id, message, buf)
+        await self._memory_remember(ctx.guild, ctx.channel.id, resolved_message, buf)
 
     @ai_group.command(name="websearch")
     async def ai_websearch(self, ctx: commands.Context, *, query: str):
@@ -820,8 +949,70 @@ class SkynetV2(ToolsMixin, MemoryMixin, StatsMixin, ListenerMixin, Orchestration
             return
         base = await self._memory_build_context(interaction.guild, interaction.channel.id, interaction.user)
         
+        # Initialize auto web search system
+        from .auto_web_search import AutoWebSearchIntegration, AutoSearchCooldownManager
+        if not hasattr(self, '_auto_search_integration'):
+            self._auto_search_integration = AutoWebSearchIntegration(self)
+        if not hasattr(self, '_auto_search_cooldowns'):
+            self._auto_search_cooldowns = AutoSearchCooldownManager()
+        
         # Resolve variables in the message
         resolved_message = await self.resolve_prompt_variables(message, interaction.guild, interaction.channel, interaction.user)
+        
+        # Auto web search integration - check if we should search for current info
+        auto_search_config = await self.config.guild(interaction.guild).auto_web_search()
+        search_context = ""
+        
+        if auto_search_config.get('enabled', False):
+            # Check if command is allowed for auto search (slash commands count as "chat")
+            if "chat" in auto_search_config.get('allowed_commands', ['chat', 'chatstream']):
+                # Check user cooldown
+                user_id = str(interaction.user.id)
+                cooldown_seconds = auto_search_config.get('cooldown_seconds', 60)
+                
+                if self._auto_search_cooldowns.can_search(user_id, cooldown_seconds):
+                    # Check if message should trigger search
+                    should_search, search_reason = self._auto_search_integration.should_trigger_search(
+                        resolved_message, auto_search_config
+                    )
+                    
+                    if should_search:
+                        # Check message length requirement
+                        min_length = auto_search_config.get('min_message_length', 10)
+                        if len(resolved_message.strip()) >= min_length:
+                            try:
+                                # Perform auto search
+                                search_data = await self._auto_search_integration.perform_auto_search(
+                                    resolved_message, interaction.guild, auto_search_config
+                                )
+                                
+                                if search_data:
+                                    # Format search results as context
+                                    search_context = self._auto_search_integration.format_search_context(
+                                        search_data, resolved_message
+                                    )
+                                    
+                                    # Record successful search for cooldown
+                                    self._auto_search_cooldowns.record_search(user_id)
+                                    
+                                    # Log auto search activity
+                                    self.logger.info(f"Auto web search triggered for slash chat user {interaction.user.id} in guild {interaction.guild.id}: {search_reason}")
+                                    
+                            except Exception as e:
+                                # Log error but don't break chat
+                                self.error_handler.log_error(e, "auto_web_search_slash", {
+                                    "user_id": interaction.user.id,
+                                    "guild_id": interaction.guild.id,
+                                    "message_preview": resolved_message[:100]
+                                })
+        
+        # Add search context to the conversation if available
+        chat_messages = base.copy()
+        if search_context:
+            # Insert search context as a system message before the user message
+            chat_messages.append(ChatMessage("system", search_context))
+        
+        chat_messages.append(ChatMessage("user", resolved_message))
         
         if stream:
             await interaction.response.defer(thinking=True)
@@ -829,7 +1020,7 @@ class SkynetV2(ToolsMixin, MemoryMixin, StatsMixin, ListenerMixin, Orchestration
             buf = ""
             last_edit = 0.0
             try:
-                async for chunk in provider.chat(model=model_name, messages=base + [ChatMessage("user", resolved_message)], stream=True):
+                async for chunk in provider.chat(model=model_name, messages=chat_messages, stream=True):
                     if not chunk:
                         continue
                     buf += chunk
@@ -866,7 +1057,7 @@ class SkynetV2(ToolsMixin, MemoryMixin, StatsMixin, ListenerMixin, Orchestration
             return
         await interaction.response.defer(thinking=True)
         chunks = []
-        async for chunk in provider.chat(model=model_name, messages=base + [ChatMessage("user", resolved_message)]):
+        async for chunk in provider.chat(model=model_name, messages=chat_messages):
             chunks.append(chunk)
         text = "".join(chunks) or "(no output)"
         last_usage = getattr(provider, "get_last_usage", lambda: None)()
@@ -1708,6 +1899,95 @@ class SkynetV2(ToolsMixin, MemoryMixin, StatsMixin, ListenerMixin, Orchestration
         
         await interaction.response.send_message(embed=embed)
 
+    @channel_group.command(name="auto_web_search_enable", description="Enable auto web search")
+    @app_commands.checks.has_permissions(manage_guild=True)
+    async def slash_channel_auto_web_search_enable(self, interaction: discord.Interaction):
+        assert interaction.guild is not None
+        
+        async with self.config.guild(interaction.guild).auto_web_search() as aws_config:
+            aws_config['enabled'] = True
+        
+        await interaction.response.send_message("✅ **Auto Web Search enabled!** The bot will now automatically search for current information when needed.")
+
+    @channel_group.command(name="auto_web_search_disable", description="Disable auto web search")
+    @app_commands.checks.has_permissions(manage_guild=True)
+    async def slash_channel_auto_web_search_disable(self, interaction: discord.Interaction):
+        assert interaction.guild is not None
+        
+        async with self.config.guild(interaction.guild).auto_web_search() as aws_config:
+            aws_config['enabled'] = False
+        
+        await interaction.response.send_message("❌ **Auto web search disabled.** The bot will no longer automatically search for current information.")
+
+    @channel_group.command(name="auto_web_search_sensitivity", description="Set auto web search sensitivity (1-5)")
+    @app_commands.describe(level="Sensitivity level: 1=very aggressive, 5=very conservative")
+    @app_commands.checks.has_permissions(manage_guild=True)
+    async def slash_channel_auto_web_search_sensitivity(self, interaction: discord.Interaction, level: int):
+        assert interaction.guild is not None
+        
+        if not 1 <= level <= 5:
+            await interaction.response.send_message("❌ Sensitivity level must be between 1 (very aggressive) and 5 (very conservative).", ephemeral=True)
+            return
+        
+        async with self.config.guild(interaction.guild).auto_web_search() as aws_config:
+            aws_config['sensitivity'] = level
+        
+        # Get description using the auto search integration
+        from .auto_web_search import AutoWebSearchIntegration
+        integration = AutoWebSearchIntegration(self)
+        description = integration.get_sensitivity_description(level)
+        
+        await interaction.response.send_message(f"✅ Auto web search sensitivity set to **{level}** - {description}")
+
+    @channel_group.command(name="auto_web_search_status", description="Show auto web search configuration")
+    @app_commands.checks.has_permissions(manage_guild=True)
+    async def slash_channel_auto_web_search_status(self, interaction: discord.Interaction):
+        assert interaction.guild is not None
+        
+        aws_config = await self.config.guild(interaction.guild).auto_web_search()
+        
+        embed = discord.Embed(
+            title="🌐 Auto Web Search Configuration",
+            description="Intelligent current information retrieval system",
+            color=0x00FF00 if aws_config.get('enabled', False) else 0xFF0000
+        )
+        
+        embed.add_field(
+            name="📡 Status",
+            value="✅ Enabled" if aws_config.get('enabled', False) else "❌ Disabled",
+            inline=True
+        )
+        
+        sensitivity = aws_config.get('sensitivity', 3)
+        from .auto_web_search import AutoWebSearchIntegration
+        integration = AutoWebSearchIntegration(self)
+        sensitivity_desc = integration.get_sensitivity_description(sensitivity)
+        
+        embed.add_field(
+            name="🎯 Sensitivity",
+            value=f"**{sensitivity}** - {sensitivity_desc}",
+            inline=True
+        )
+        
+        embed.add_field(
+            name="⚙️ Settings",
+            value=f"**Max Results:** {aws_config.get('max_results', 5)}\n"
+                  f"**Timeout:** {aws_config.get('timeout_seconds', 15)}s\n"
+                  f"**Cooldown:** {aws_config.get('cooldown_seconds', 60)}s",
+            inline=True
+        )
+        
+        embed.add_field(
+            name="📋 How It Works",
+            value="• Automatically detects when questions need current information\n"
+                  "• Triggers on current events, dates, news, real-time data queries\n" 
+                  "• Searches web and includes results in AI context\n"
+                  "• Works with chat commands and passive listening",
+            inline=False
+        )
+        
+        await interaction.response.send_message(embed=embed)
+
     # ----------------
     # Agent Orchestration Commands
     # ----------------
@@ -2423,6 +2703,206 @@ class SkynetV2(ToolsMixin, MemoryMixin, StatsMixin, ListenerMixin, Orchestration
             
             if solutions:
                 embed.add_field(name="💡 Suggested Solutions", value="\n".join(solutions), inline=False)
+        
+        await ctx.send(embed=embed)
+
+    @ai_channel.group(name="auto_web_search")
+    async def ai_channel_auto_web_search(self, ctx: commands.Context):
+        """Auto web search configuration for intelligent current information retrieval."""
+        if ctx.invoked_subcommand is None:
+            return
+
+    @ai_channel_auto_web_search.command(name="enable")
+    async def ai_channel_auto_web_search_enable(self, ctx: commands.Context):
+        """Enable auto web search for this guild."""
+        if ctx.guild is None:
+            await ctx.send(ResponseFormatter.format_error(
+                "Guild Not Found", 
+                "This command must be used within a server.",
+                "Please run this command from a channel in the server you want to configure."
+            ))
+            return
+        
+        async with self.config.guild(ctx.guild).auto_web_search() as aws_config:
+            aws_config['enabled'] = True
+        
+        await ctx.send("✅ **Auto Web Search enabled!** The bot will now automatically search for current information when needed.\n"
+                      "🔧 Configure sensitivity with `+ai channel auto_web_search sensitivity <1-5>`\n"
+                      "🧪 Test with `+ai channel auto_web_search test <message>`")
+
+    @ai_channel_auto_web_search.command(name="disable")
+    async def ai_channel_auto_web_search_disable(self, ctx: commands.Context):
+        """Disable auto web search for this guild."""
+        if ctx.guild is None:
+            await ctx.send(ResponseFormatter.format_error(
+                "Guild Not Found", 
+                "This command must be used within a server.",
+                "Please run this command from a channel in the server you want to configure."
+            ))
+            return
+        
+        async with self.config.guild(ctx.guild).auto_web_search() as aws_config:
+            aws_config['enabled'] = False
+        
+        await ctx.send("❌ **Auto web search disabled.** The bot will no longer automatically search for current information.")
+
+    @ai_channel_auto_web_search.command(name="sensitivity")
+    async def ai_channel_auto_web_search_sensitivity(self, ctx: commands.Context, level: int):
+        """Set auto web search sensitivity level (1=very aggressive, 5=very conservative)."""
+        if ctx.guild is None:
+            await ctx.send(ResponseFormatter.format_error(
+                "Guild Not Found", 
+                "This command must be used within a server.",
+                "Please run this command from a channel in the server you want to configure."
+            ))
+            return
+        
+        if not 1 <= level <= 5:
+            await ctx.send("❌ Sensitivity level must be between 1 (very aggressive) and 5 (very conservative).")
+            return
+        
+        async with self.config.guild(ctx.guild).auto_web_search() as aws_config:
+            aws_config['sensitivity'] = level
+        
+        # Get description using the auto search integration
+        from .auto_web_search import AutoWebSearchIntegration
+        integration = AutoWebSearchIntegration(self)
+        description = integration.get_sensitivity_description(level)
+        
+        await ctx.send(f"✅ Auto web search sensitivity set to **{level}** - {description}")
+
+    @ai_channel_auto_web_search.command(name="status") 
+    async def ai_channel_auto_web_search_status(self, ctx: commands.Context):
+        """Show current auto web search configuration."""
+        if ctx.guild is None:
+            await ctx.send(ResponseFormatter.format_error(
+                "Guild Not Found", 
+                "This command must be used within a server.",
+                "Please run this command from a channel in the server you want to configure."
+            ))
+            return
+        
+        aws_config = await self.config.guild(ctx.guild).auto_web_search()
+        
+        embed = discord.Embed(
+            title="🌐 Auto Web Search Configuration",
+            description="Intelligent current information retrieval system",
+            color=0x00FF00 if aws_config.get('enabled', False) else 0xFF0000
+        )
+        
+        embed.add_field(
+            name="📡 Status",
+            value="✅ Enabled" if aws_config.get('enabled', False) else "❌ Disabled",
+            inline=True
+        )
+        
+        sensitivity = aws_config.get('sensitivity', 3)
+        from .auto_web_search import AutoWebSearchIntegration
+        integration = AutoWebSearchIntegration(self)
+        sensitivity_desc = integration.get_sensitivity_description(sensitivity)
+        
+        embed.add_field(
+            name="🎯 Sensitivity",
+            value=f"**{sensitivity}** - {sensitivity_desc}",
+            inline=True
+        )
+        
+        embed.add_field(
+            name="⚙️ Settings",
+            value=f"**Max Results:** {aws_config.get('max_results', 5)}\n"
+                  f"**Timeout:** {aws_config.get('timeout_seconds', 15)}s\n"
+                  f"**Cooldown:** {aws_config.get('cooldown_seconds', 60)}s\n"
+                  f"**Min Message Length:** {aws_config.get('min_message_length', 10)}",
+            inline=True
+        )
+        
+        allowed_commands = aws_config.get('allowed_commands', ['chat', 'chatstream'])
+        embed.add_field(
+            name="🔧 Allowed Commands",
+            value=", ".join(f"`{cmd}`" for cmd in allowed_commands),
+            inline=False
+        )
+        
+        trigger_keywords = aws_config.get('trigger_keywords', [])
+        embed.add_field(
+            name="🔑 Custom Trigger Keywords",
+            value=", ".join(f"`{kw}`" for kw in trigger_keywords[:8]) if trigger_keywords else "*None configured*",
+            inline=False
+        )
+        
+        embed.add_field(
+            name="📋 How It Works",
+            value="• Automatically detects when questions need current information\n"
+                  "• Triggers on current events, dates, news, real-time data queries\n" 
+                  "• Searches web and includes results in AI context\n"
+                  "• Works with chat commands and passive listening\n"
+                  "• Respects user cooldowns to prevent spam",
+            inline=False
+        )
+        
+        await ctx.send(embed=embed)
+
+    @ai_channel_auto_web_search.command(name="test")
+    async def ai_channel_auto_web_search_test(self, ctx: commands.Context, *, test_message: str):
+        """Test what auto web search would decide for a given message."""
+        if ctx.guild is None:
+            await ctx.send(ResponseFormatter.format_error(
+                "Guild Not Found", 
+                "This command must be used within a server.",
+                "Please run this command from a channel in the server you want to test."
+            ))
+            return
+        
+        # Import the auto web search integration
+        from .auto_web_search import AutoWebSearchIntegration
+        
+        aws_config = await self.config.guild(ctx.guild).auto_web_search()
+        
+        if not hasattr(self, '_auto_search_integration'):
+            self._auto_search_integration = AutoWebSearchIntegration(self)
+        
+        should_search, reason = self._auto_search_integration.should_trigger_search(
+            test_message, aws_config
+        )
+        
+        embed = discord.Embed(
+            title="🧪 Auto Web Search Test Result",
+            description=f"**Test Message:** `{test_message}`",
+            color=0x00FF00 if should_search else 0xFF0000
+        )
+        
+        embed.add_field(
+            name="🌐 Search Decision",
+            value=f"**{'✅ WOULD SEARCH' if should_search else '❌ WOULD NOT SEARCH'}**",
+            inline=False
+        )
+        
+        embed.add_field(
+            name="💭 Analysis Result",
+            value=reason,
+            inline=False
+        )
+        
+        # Show what would be searched for if triggered
+        if should_search:
+            # Use existing autosearch classification to show search strategy
+            mode, params, followups = self._heuristic_classify_autosearch(test_message)
+            embed.add_field(
+                name="🔍 Search Strategy",
+                value=f"**Mode:** {mode.title()}\n"
+                      f"**Params:** {', '.join(f'{k}={v}' for k, v in params.items())}\n"
+                      f"**Follow-ups:** {', '.join(followups) if followups else 'None'}",
+                inline=False
+            )
+        
+        embed.add_field(
+            name="⚙️ Current Settings",
+            value=f"**Enabled:** {'Yes' if aws_config.get('enabled', False) else 'No'}\n"
+                  f"**Sensitivity:** {aws_config.get('sensitivity', 3)}/5\n"
+                  f"**Min Length:** {aws_config.get('min_message_length', 10)} chars\n"
+                  f"**Test Message Length:** {len(test_message)} chars",
+            inline=False
+        )
         
         await ctx.send(embed=embed)
 

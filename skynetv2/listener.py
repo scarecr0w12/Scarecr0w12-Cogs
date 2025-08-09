@@ -141,9 +141,62 @@ class ListenerMixin:
             if mode == "mention" and self.bot.user:
                 processed_content = ConversationManager.extract_mention_content(message, self.bot.user)
             
+            # Auto web search integration for passive listening
+            from .auto_web_search import AutoWebSearchIntegration, AutoSearchCooldownManager
+            if not hasattr(self, '_auto_search_integration'):
+                self._auto_search_integration = AutoWebSearchIntegration(self)
+            if not hasattr(self, '_auto_search_cooldowns'):
+                self._auto_search_cooldowns = AutoSearchCooldownManager()
+            
+            auto_search_config = await self.config.guild(guild).auto_web_search()
+            search_context = ""
+            
+            if auto_search_config.get('enabled', False):
+                # Check if current listening mode is allowed for auto search
+                if mode in auto_search_config.get('allowed_modes', ['mention', 'keyword', 'all']):
+                    # Check user cooldown
+                    user_id = str(message.author.id)
+                    cooldown_seconds = auto_search_config.get('cooldown_seconds', 60)
+                    
+                    if self._auto_search_cooldowns.can_search(user_id, cooldown_seconds):
+                        # Check if message should trigger search
+                        should_search, search_reason = self._auto_search_integration.should_trigger_search(
+                            processed_content, auto_search_config
+                        )
+                        
+                        if should_search:
+                            # Check message length requirement
+                            min_length = auto_search_config.get('min_message_length', 10)
+                            if len(processed_content.strip()) >= min_length:
+                                try:
+                                    # Perform auto search
+                                    search_data = await self._auto_search_integration.perform_auto_search(
+                                        processed_content, guild, auto_search_config
+                                    )
+                                    
+                                    if search_data:
+                                        # Format search results as context
+                                        search_context = self._auto_search_integration.format_search_context(
+                                            search_data, processed_content
+                                        )
+                                        
+                                        # Record successful search for cooldown
+                                        self._auto_search_cooldowns.record_search(user_id)
+                                        
+                                        print(f"[SkynetV2 Listener] Auto web search triggered: {search_reason}")
+                                        
+                                except Exception as e:
+                                    # Log error but don't break listener
+                                    print(f"[SkynetV2 Listener] Auto search error: {e}")
+            
             # Always use conversation memory for consistent behavior across all modes
             print(f"[SkynetV2 Listener] Building conversation context with memory...")
             messages = await self._memory_build_context(guild, message.channel.id, message.author)
+            
+            # Add search context if available
+            if search_context:
+                messages.append(ChatMessage("system", search_context))
+            
             # Add current message to context
             messages.append(ChatMessage("user", processed_content or "Hello"))
             

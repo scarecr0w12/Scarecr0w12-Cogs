@@ -1229,9 +1229,36 @@ async def handle_toggle(request: web.Request):
         if not guild:
             # Enhanced debugging for guild not found
             all_guilds = [g.id for g in webiface.cog.bot.guilds]
+            all_guild_names = [(g.id, g.name) for g in webiface.cog.bot.guilds]
             print(f"SkynetV2 Web: Guild {gid} not found. Bot is in guilds: {all_guilds}")
+            print(f"SkynetV2 Web: Guild names: {all_guild_names}")
+            print(f"SkynetV2 Web: Guild ID type: {type(gid)}, searching for type: {type(all_guilds[0]) if all_guilds else 'N/A'}")
+            print(f"SkynetV2 Web: Bot user: {webiface.cog.bot.user}")
+            print(f"SkynetV2 Web: Bot ready: {webiface.cog.bot.is_ready()}")
             print(f"SkynetV2 Web: User permissions: {user.get('permissions', {})}")
-            return web.json_response({'success': False, 'error': f'Guild not found. Bot may not be in guild {gid} or guild may be temporarily unavailable.'})
+            
+            # Try alternative lookup methods
+            try:
+                # Try getting through cache
+                guild_via_cache = webiface.cog.bot._get_guild(gid) if hasattr(webiface.cog.bot, '_get_guild') else None
+                print(f"SkynetV2 Web: Guild via cache: {guild_via_cache}")
+                
+                # Try fetching if we have that method
+                if hasattr(webiface.cog.bot, 'fetch_guild'):
+                    try:
+                        guild_via_fetch = await webiface.cog.bot.fetch_guild(gid)
+                        print(f"SkynetV2 Web: Guild via fetch: {guild_via_fetch}")
+                        if guild_via_fetch:
+                            guild = guild_via_fetch  # Use fetched guild
+                    except Exception as fetch_error:
+                        print(f"SkynetV2 Web: Fetch guild error: {fetch_error}")
+            except Exception as lookup_error:
+                print(f"SkynetV2 Web: Alternative lookup error: {lookup_error}")
+            
+            # If still no guild found, return error
+            if not guild:
+                return web.json_response({'success': False, 'error': f'Guild not found. Bot may not be in guild {gid} or guild may be temporarily unavailable.'})
+        
         
         print(f"SkynetV2 Web: Toggle request for guild {guild.name} ({gid})")
         

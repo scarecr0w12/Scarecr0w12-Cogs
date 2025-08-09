@@ -2130,6 +2130,79 @@ class SkynetV2(ToolsMixin, MemoryMixin, StatsMixin, ListenerMixin, Orchestration
         
         await ctx.send(embed=embed)
 
+    @ai_group.command(name="debug")
+    @checks.is_owner()
+    async def ai_debug(self, ctx: commands.Context, guild_id: Optional[int] = None):
+        """Debug bot guild access and web interface issues."""
+        if guild_id is None:
+            guild_id = ctx.guild.id if ctx.guild else None
+        
+        if guild_id is None:
+            await ctx.send("❌ No guild ID provided and command not run in a guild.")
+            return
+        
+        embed = discord.Embed(title="🔍 SkynetV2 Debug Information", color=0x3b82f6)
+        
+        # Basic bot info
+        embed.add_field(
+            name="🤖 Bot Status",
+            value=f"**User:** {self.bot.user}\n**ID:** {self.bot.user.id}\n**Ready:** {self.bot.is_ready()}",
+            inline=False
+        )
+        
+        # Guild lookup
+        target_guild = self.bot.get_guild(guild_id)
+        if target_guild:
+            embed.add_field(
+                name="🏠 Target Guild Found",
+                value=f"**Name:** {target_guild.name}\n**ID:** {target_guild.id}\n**Members:** {target_guild.member_count}",
+                inline=False
+            )
+            
+            # Bot's permissions in guild
+            bot_member = target_guild.get_member(self.bot.user.id)
+            if bot_member:
+                perms = bot_member.guild_permissions
+                embed.add_field(
+                    name="🛡️ Bot Permissions",
+                    value=f"**Admin:** {perms.administrator}\n**Manage Guild:** {perms.manage_guild}\n**Send Messages:** {perms.send_messages}",
+                    inline=False
+                )
+            else:
+                embed.add_field(name="⚠️ Warning", value="Bot member not found in guild", inline=False)
+        else:
+            embed.add_field(
+                name="❌ Target Guild NOT Found",
+                value=f"**Searching for:** {guild_id}\n**Type:** {type(guild_id)}",
+                inline=False
+            )
+        
+        # All guilds bot is in
+        all_guilds = [(g.id, g.name) for g in self.bot.guilds]
+        guild_list = "\n".join([f"• {name} (`{gid}`)" for gid, name in all_guilds[:10]])  # First 10
+        if len(all_guilds) > 10:
+            guild_list += f"\n... and {len(all_guilds) - 10} more"
+        
+        embed.add_field(
+            name=f"🌐 Bot Guilds ({len(all_guilds)} total)",
+            value=guild_list or "None",
+            inline=False
+        )
+        
+        # Check if target guild is in list
+        if guild_id in [g.id for g in self.bot.guilds]:
+            embed.add_field(name="✅ Status", value="Target guild IS in bot's guild list", inline=False)
+        else:
+            embed.add_field(name="❌ Status", value="Target guild is NOT in bot's guild list", inline=False)
+        
+        # Web interface status
+        if hasattr(self, 'web_server') and self.web_server:
+            embed.add_field(name="🌐 Web Interface", value="✅ Running", inline=True)
+        else:
+            embed.add_field(name="🌐 Web Interface", value="❌ Not running", inline=True)
+        
+        await ctx.send(embed=embed)
+
     # ----------------
     # Web Interface Commands
     # ----------------

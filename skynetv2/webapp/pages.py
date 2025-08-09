@@ -1225,6 +1225,13 @@ async def handle_toggle(request: web.Request):
         gid = int(request.match_info['guild_id'])
         print(f"SkynetV2 Web: Toggle request for guild {gid}")
         
+        # Debug the webiface and bot references
+        print(f"SkynetV2 Web: webiface object: {webiface}")
+        print(f"SkynetV2 Web: webiface.cog object: {webiface.cog}")
+        print(f"SkynetV2 Web: webiface.cog.bot object: {webiface.cog.bot}")
+        print(f"SkynetV2 Web: Bot user: {webiface.cog.bot.user}")
+        print(f"SkynetV2 Web: Bot ready: {webiface.cog.bot.is_ready()}")
+        
         guild = webiface.cog.bot.get_guild(gid)
         if not guild:
             # Enhanced debugging for guild not found
@@ -2444,7 +2451,24 @@ def setup(webiface):
     app.router.add_get('/usage/{guild_id}', guild_usage)
     app.router.add_get('/test/{guild_id}', guild_test)
     
-    # Add API endpoints for form submissions
+async def debug_bot_status(request: web.Request):
+    """Debug endpoint to check bot status"""
+    webiface = request.app['webiface']
+    
+    try:
+        bot_info = {
+            'bot_user': str(webiface.cog.bot.user),
+            'bot_ready': webiface.cog.bot.is_ready(),
+            'guild_count': len(webiface.cog.bot.guilds),
+            'guild_ids': [g.id for g in webiface.cog.bot.guilds],
+            'specific_guild_600375939951493130': webiface.cog.bot.get_guild(600375939951493130) is not None
+        }
+        return web.json_response(bot_info)
+    except Exception as e:
+        return web.json_response({'error': str(e)})
+
+# Add API endpoints for form submissions
+    app.router.add_get('/api/debug/bot', debug_bot_status)
     app.router.add_post('/api/guild/{guild_id}/toggle', handle_toggle)
     app.router.add_post('/api/guild/{guild_id}/config/providers', handle_providers_config)
     app.router.add_post('/api/guild/{guild_id}/config/model', handle_model_config)

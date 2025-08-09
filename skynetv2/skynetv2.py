@@ -527,6 +527,7 @@ class SkynetV2(ToolsMixin, MemoryMixin, StatsMixin, ListenerMixin, Orchestration
     tools_group = app_commands.Group(name="tools", description="Tool management", parent=ai_slash)
     search_group = app_commands.Group(name="search", description="Search provider controls", parent=ai_slash)
     provider_group = app_commands.Group(name="provider", description="Provider management", parent=ai_slash)
+    channel_group = app_commands.Group(name="channel", description="Per-channel AI listening configuration", parent=ai_slash)
 
     @governance_group.command(name="show", description="Show governance policy")
     @app_commands.checks.has_permissions(manage_guild=True)
@@ -1056,6 +1057,218 @@ class SkynetV2(ToolsMixin, MemoryMixin, StatsMixin, ListenerMixin, Orchestration
         await interaction.response.send_message(f"Set {provider} API key ({scope}).", ephemeral=True)
 
     # ----------------
+    # Channel Listening Slash Commands
+    # ----------------
+
+    @channel_group.command(name="listening_enable", description="Enable AI listening in a channel")
+    @app_commands.describe(channel="Channel to enable (default: current channel)")
+    @app_commands.checks.has_permissions(manage_guild=True)
+    async def slash_channel_listening_enable(self, interaction: discord.Interaction, channel: Optional[discord.TextChannel] = None):
+        assert interaction.guild is not None
+        
+        target_channel: discord.TextChannel
+        if channel is None:
+            if not isinstance(interaction.channel, discord.TextChannel):
+                await interaction.response.send_message("❌ This command must be used in a text channel or specify a channel.", ephemeral=True)
+                return
+            target_channel = interaction.channel
+        else:
+            target_channel = channel
+        
+        guild = interaction.guild
+        channel_id = str(target_channel.id)
+        
+        async with self.config.guild(guild).channel_listening() as channel_listening:
+            if channel_id not in channel_listening:
+                channel_listening[channel_id] = {}
+            channel_listening[channel_id]['enabled'] = True
+            # Set default mode if not already configured
+            if 'mode' not in channel_listening[channel_id]:
+                channel_listening[channel_id]['mode'] = 'mention'
+        
+        await interaction.response.send_message(f"✅ AI listening enabled in {target_channel.mention}")
+
+    @channel_group.command(name="listening_disable", description="Disable AI listening in a channel")
+    @app_commands.describe(channel="Channel to disable (default: current channel)")
+    @app_commands.checks.has_permissions(manage_guild=True)
+    async def slash_channel_listening_disable(self, interaction: discord.Interaction, channel: Optional[discord.TextChannel] = None):
+        assert interaction.guild is not None
+        
+        target_channel: discord.TextChannel
+        if channel is None:
+            if not isinstance(interaction.channel, discord.TextChannel):
+                await interaction.response.send_message("❌ This command must be used in a text channel or specify a channel.", ephemeral=True)
+                return
+            target_channel = interaction.channel
+        else:
+            target_channel = channel
+        
+        guild = interaction.guild
+        channel_id = str(target_channel.id)
+        
+        async with self.config.guild(guild).channel_listening() as channel_listening:
+            if channel_id not in channel_listening:
+                channel_listening[channel_id] = {}
+            channel_listening[channel_id]['enabled'] = False
+        
+        await interaction.response.send_message(f"❌ AI listening disabled in {target_channel.mention}")
+
+    @channel_group.command(name="mode_set", description="Set listening mode for a channel")
+    @app_commands.describe(mode="Listening mode", channel="Channel to configure (default: current channel)")
+    @app_commands.choices(mode=[
+        app_commands.Choice(name="Mention Only", value="mention"),
+        app_commands.Choice(name="Keywords", value="keyword"), 
+        app_commands.Choice(name="All Messages", value="all")
+    ])
+    @app_commands.checks.has_permissions(manage_guild=True)
+    async def slash_channel_mode_set(self, interaction: discord.Interaction, mode: str, channel: Optional[discord.TextChannel] = None):
+        assert interaction.guild is not None
+        
+        target_channel: discord.TextChannel
+        if channel is None:
+            if not isinstance(interaction.channel, discord.TextChannel):
+                await interaction.response.send_message("❌ This command must be used in a text channel or specify a channel.", ephemeral=True)
+                return
+            target_channel = interaction.channel
+        else:
+            target_channel = channel
+        
+        guild = interaction.guild
+        channel_id = str(target_channel.id)
+        
+        async with self.config.guild(guild).channel_listening() as channel_listening:
+            if channel_id not in channel_listening:
+                channel_listening[channel_id] = {}
+            channel_listening[channel_id]['mode'] = mode.lower()
+            # Enable if not already enabled
+            if not channel_listening[channel_id].get('enabled', False):
+                channel_listening[channel_id]['enabled'] = True
+        
+        mode_descriptions = {
+            'mention': 'Only respond when bot is mentioned',
+            'keyword': 'Respond to messages containing configured keywords',
+            'all': 'Respond to all messages in the channel'
+        }
+        
+        await interaction.response.send_message(f"✅ Set listening mode for {target_channel.mention} to `{mode.lower()}`\n"
+                                              f"📋 {mode_descriptions[mode.lower()]}")
+
+    @channel_group.command(name="keywords_set", description="Set keywords for channel listening")
+    @app_commands.describe(keywords="Comma-separated keywords", channel="Channel to configure (default: current channel)")
+    @app_commands.checks.has_permissions(manage_guild=True)
+    async def slash_channel_keywords_set(self, interaction: discord.Interaction, keywords: str, channel: Optional[discord.TextChannel] = None):
+        assert interaction.guild is not None
+        
+        target_channel: discord.TextChannel
+        if channel is None:
+            if not isinstance(interaction.channel, discord.TextChannel):
+                await interaction.response.send_message("❌ This command must be used in a text channel or specify a channel.", ephemeral=True)
+                return
+            target_channel = interaction.channel
+        else:
+            target_channel = channel
+        
+        guild = interaction.guild
+        channel_id = str(target_channel.id)
+        
+        # Parse keywords
+        keyword_list = [k.strip().lower() for k in keywords.split(',') if k.strip()]
+        if not keyword_list:
+            await interaction.response.send_message("❌ Please provide at least one keyword.", ephemeral=True)
+            return
+        
+        async with self.config.guild(guild).channel_listening() as channel_listening:
+            if channel_id not in channel_listening:
+                channel_listening[channel_id] = {}
+            channel_listening[channel_id]['keywords'] = keyword_list
+            # Set mode to keyword if not already configured
+            if 'mode' not in channel_listening[channel_id]:
+                channel_listening[channel_id]['mode'] = 'keyword'
+            # Enable if not already enabled
+            if not channel_listening[channel_id].get('enabled', False):
+                channel_listening[channel_id]['enabled'] = True
+        
+        await interaction.response.send_message(f"✅ Set keywords for {target_channel.mention}: `{', '.join(keyword_list)}`\n"
+                                              f"💡 Mode automatically set to `keyword`")
+
+    @channel_group.command(name="status", description="Show channel listening configuration")
+    @app_commands.describe(channel="Channel to check (default: current channel)")
+    @app_commands.checks.has_permissions(manage_guild=True)
+    async def slash_channel_status(self, interaction: discord.Interaction, channel: Optional[discord.TextChannel] = None):
+        assert interaction.guild is not None
+        
+        target_channel: discord.TextChannel
+        if channel is None:
+            if not isinstance(interaction.channel, discord.TextChannel):
+                await interaction.response.send_message("❌ This command must be used in a text channel or specify a channel.", ephemeral=True)
+                return
+            target_channel = interaction.channel
+        else:
+            target_channel = channel
+        
+        guild = interaction.guild
+        channel_id = str(target_channel.id)
+        
+        # Get channel-specific config
+        channel_listening = await self.config.guild(guild).channel_listening()
+        channel_config = channel_listening.get(channel_id, {})
+        
+        # Get global config as fallback
+        global_listening = await self.config.guild(guild).listening()
+        
+        # Determine effective configuration
+        enabled = channel_config.get('enabled')
+        if enabled is None:
+            enabled = global_listening.get('enabled', False)
+            source = "global default"
+        else:
+            source = "channel override"
+        
+        mode = channel_config.get('mode') or global_listening.get('mode', 'mention')
+        keywords = channel_config.get('keywords') or global_listening.get('keywords', [])
+        
+        embed = discord.Embed(
+            title=f"🎧 Channel Listening Status",
+            description=f"Configuration for {target_channel.mention}",
+            color=0x00FF00 if enabled else 0xFF0000
+        )
+        
+        embed.add_field(
+            name="📡 Status",
+            value=f"{'✅ Enabled' if enabled else '❌ Disabled'} ({source})",
+            inline=True
+        )
+        
+        embed.add_field(
+            name="🎯 Mode",
+            value=f"`{mode}`",
+            inline=True
+        )
+        
+        if mode == 'keyword' and keywords:
+            embed.add_field(
+                name="🔑 Keywords",
+                value=f"`{', '.join(keywords)}`",
+                inline=False
+            )
+        elif mode == 'keyword':
+            embed.add_field(
+                name="🔑 Keywords",
+                value="*None configured*",
+                inline=False
+            )
+        
+        embed.add_field(
+            name="📋 Mode Descriptions",
+            value="• `mention`: Only respond when bot is mentioned\n"
+                  "• `keyword`: Respond to messages with keywords\n"
+                  "• `all`: Respond to all messages",
+            inline=False
+        )
+        
+        await interaction.response.send_message(embed=embed)
+
+    # ----------------
     # Agent Orchestration Commands
     # ----------------
     
@@ -1169,6 +1382,216 @@ class SkynetV2(ToolsMixin, MemoryMixin, StatsMixin, ListenerMixin, Orchestration
     def _mask_key(self, key: str) -> str:
         """Mask sensitive API keys for display."""
         return self.error_handler.redact_secrets(key)
+
+    # ----------------
+    # Channel Listening Commands
+    # ----------------
+
+    @ai_group.group(name="channel")
+    @commands.guild_only()
+    @checks.admin_or_permissions(manage_guild=True)
+    async def ai_channel(self, ctx: commands.Context):
+        """Per-channel AI listening configuration."""
+        if ctx.invoked_subcommand is None:
+            return  # avoid duplicate help spam
+
+    @ai_channel.group(name="listening")
+    async def ai_channel_listening(self, ctx: commands.Context):
+        """Channel-specific listening configuration."""
+        if ctx.invoked_subcommand is None:
+            return
+
+    @ai_channel_listening.command(name="enable")
+    async def ai_channel_listening_enable(self, ctx: commands.Context, channel: discord.TextChannel = None):
+        """Enable AI listening in a specific channel."""
+        if channel is None:
+            channel = ctx.channel
+        
+        guild = ctx.guild
+        channel_id = str(channel.id)
+        
+        async with self.config.guild(guild).channel_listening() as channel_listening:
+            if channel_id not in channel_listening:
+                channel_listening[channel_id] = {}
+            channel_listening[channel_id]['enabled'] = True
+            # Set default mode if not already configured
+            if 'mode' not in channel_listening[channel_id]:
+                channel_listening[channel_id]['mode'] = 'mention'
+        
+        await ctx.send(f"✅ AI listening enabled in {channel.mention}")
+
+    @ai_channel_listening.command(name="disable")
+    async def ai_channel_listening_disable(self, ctx: commands.Context, channel: discord.TextChannel = None):
+        """Disable AI listening in a specific channel."""
+        if channel is None:
+            channel = ctx.channel
+        
+        guild = ctx.guild
+        channel_id = str(channel.id)
+        
+        async with self.config.guild(guild).channel_listening() as channel_listening:
+            if channel_id not in channel_listening:
+                channel_listening[channel_id] = {}
+            channel_listening[channel_id]['enabled'] = False
+        
+        await ctx.send(f"❌ AI listening disabled in {channel.mention}")
+
+    @ai_channel.group(name="mode")
+    async def ai_channel_mode(self, ctx: commands.Context):
+        """Channel listening mode configuration."""
+        if ctx.invoked_subcommand is None:
+            return
+
+    @ai_channel_mode.command(name="set")
+    async def ai_channel_mode_set(self, ctx: commands.Context, mode: str, channel: discord.TextChannel = None):
+        """Set listening mode for a channel (mention, keyword, all)."""
+        if channel is None:
+            channel = ctx.channel
+        
+        if mode.lower() not in ['mention', 'keyword', 'all']:
+            await ctx.send("❌ Mode must be one of: `mention`, `keyword`, `all`")
+            return
+        
+        guild = ctx.guild
+        channel_id = str(channel.id)
+        
+        async with self.config.guild(guild).channel_listening() as channel_listening:
+            if channel_id not in channel_listening:
+                channel_listening[channel_id] = {}
+            channel_listening[channel_id]['mode'] = mode.lower()
+            # Enable if not already enabled
+            if not channel_listening[channel_id].get('enabled', False):
+                channel_listening[channel_id]['enabled'] = True
+        
+        mode_descriptions = {
+            'mention': 'Only respond when bot is mentioned',
+            'keyword': 'Respond to messages containing configured keywords',
+            'all': 'Respond to all messages in the channel'
+        }
+        
+        await ctx.send(f"✅ Set listening mode for {channel.mention} to `{mode.lower()}`\n"
+                      f"📋 {mode_descriptions[mode.lower()]}")
+
+    @ai_channel.group(name="keywords")
+    async def ai_channel_keywords(self, ctx: commands.Context):
+        """Channel keyword configuration."""
+        if ctx.invoked_subcommand is None:
+            return
+
+    @ai_channel_keywords.command(name="set")
+    async def ai_channel_keywords_set(self, ctx: commands.Context, keywords: str, channel: discord.TextChannel = None):
+        """Set keywords for channel listening (comma-separated)."""
+        if channel is None:
+            channel = ctx.channel
+        
+        guild = ctx.guild
+        channel_id = str(channel.id)
+        
+        # Parse keywords
+        keyword_list = [k.strip().lower() for k in keywords.split(',') if k.strip()]
+        if not keyword_list:
+            await ctx.send("❌ Please provide at least one keyword.")
+            return
+        
+        async with self.config.guild(guild).channel_listening() as channel_listening:
+            if channel_id not in channel_listening:
+                channel_listening[channel_id] = {}
+            channel_listening[channel_id]['keywords'] = keyword_list
+            # Set mode to keyword if not already configured
+            if 'mode' not in channel_listening[channel_id]:
+                channel_listening[channel_id]['mode'] = 'keyword'
+            # Enable if not already enabled
+            if not channel_listening[channel_id].get('enabled', False):
+                channel_listening[channel_id]['enabled'] = True
+        
+        await ctx.send(f"✅ Set keywords for {channel.mention}: `{', '.join(keyword_list)}`\n"
+                      f"💡 Mode automatically set to `keyword`")
+
+    @ai_channel_keywords.command(name="show")
+    async def ai_channel_keywords_show(self, ctx: commands.Context, channel: discord.TextChannel = None):
+        """Show current keywords for a channel."""
+        if channel is None:
+            channel = ctx.channel
+        
+        guild = ctx.guild
+        channel_id = str(channel.id)
+        
+        channel_listening = await self.config.guild(guild).channel_listening()
+        channel_config = channel_listening.get(channel_id, {})
+        keywords = channel_config.get('keywords', [])
+        
+        if keywords:
+            await ctx.send(f"📋 Keywords for {channel.mention}: `{', '.join(keywords)}`")
+        else:
+            await ctx.send(f"❌ No keywords configured for {channel.mention}")
+
+    @ai_channel.command(name="status")
+    async def ai_channel_status(self, ctx: commands.Context, channel: discord.TextChannel = None):
+        """Show current channel listening configuration."""
+        if channel is None:
+            channel = ctx.channel
+        
+        guild = ctx.guild
+        channel_id = str(channel.id)
+        
+        # Get channel-specific config
+        channel_listening = await self.config.guild(guild).channel_listening()
+        channel_config = channel_listening.get(channel_id, {})
+        
+        # Get global config as fallback
+        global_listening = await self.config.guild(guild).listening()
+        
+        # Determine effective configuration
+        enabled = channel_config.get('enabled')
+        if enabled is None:
+            enabled = global_listening.get('enabled', False)
+            source = "global default"
+        else:
+            source = "channel override"
+        
+        mode = channel_config.get('mode') or global_listening.get('mode', 'mention')
+        keywords = channel_config.get('keywords') or global_listening.get('keywords', [])
+        
+        embed = discord.Embed(
+            title=f"🎧 Channel Listening Status",
+            description=f"Configuration for {channel.mention}",
+            color=0x00FF00 if enabled else 0xFF0000
+        )
+        
+        embed.add_field(
+            name="📡 Status",
+            value=f"{'✅ Enabled' if enabled else '❌ Disabled'} ({source})",
+            inline=True
+        )
+        
+        embed.add_field(
+            name="🎯 Mode",
+            value=f"`{mode}`",
+            inline=True
+        )
+        
+        if mode == 'keyword' and keywords:
+            embed.add_field(
+                name="🔑 Keywords",
+                value=f"`{', '.join(keywords)}`",
+                inline=False
+            )
+        elif mode == 'keyword':
+            embed.add_field(
+                name="🔑 Keywords",
+                value="*None configured*",
+                inline=False
+            )
+        
+        embed.add_field(
+            name="📋 Mode Descriptions",
+            value="• `mention`: Only respond when bot is mentioned\n"
+                  "• `keyword`: Respond to messages with keywords\n"
+                  "• `all`: Respond to all messages",
+            inline=False
+        )
+        
+        await ctx.send(embed=embed)
 
     # ----------------
     # Web Interface Commands

@@ -88,5 +88,9 @@ class ListenerMixin:
                     u["tokens_total"] = int(u.get("tokens_total", 0)) + int(last_usage.get("total", 0))
                     c["tokens_total"] = int(c.get("tokens_total", 0)) + int(last_usage.get("total", 0))
             await message.channel.send(text[:2000])
-        except Exception:
+        except Exception as e:
+            # Log the exception for debugging instead of silently returning
+            import traceback
+            print(f"[SkynetV2 Listener] Error processing message: {e}")
+            print(traceback.format_exc())
             return

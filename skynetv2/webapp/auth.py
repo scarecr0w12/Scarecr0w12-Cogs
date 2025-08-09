@@ -16,8 +16,26 @@ async def get_user_permissions(webiface: Any, user_info: Dict, user_guilds: List
     user_id = int(user_info['id'])
     permissions = {'bot_owner': False,'guild_admin': set(),'guild_member': set(),'guilds': set()}
     app_info = await webiface.cog.bot.application_info()
-    print(f"SkynetV2 Web: Bot owner check - user: {user_id}, bot owner: {app_info.owner.id}")
-    if user_id == app_info.owner.id:
+    
+    # Check if user is bot owner (handle both individual and team ownership)
+    is_owner = False
+    if hasattr(app_info.owner, 'id') and user_id == app_info.owner.id:
+        # Individual ownership
+        is_owner = True
+        print(f"SkynetV2 Web: User is individual bot owner - user: {user_id}, bot owner: {app_info.owner.id}")
+    elif hasattr(app_info, 'team') and app_info.team:
+        # Team ownership - check if user is a team member
+        for member in app_info.team.members:
+            if user_id == member.id:
+                is_owner = True
+                print(f"SkynetV2 Web: User is team member - user: {user_id}, team: {app_info.team.name}")
+                break
+        if not is_owner:
+            print(f"SkynetV2 Web: User not in team - user: {user_id}, team members: {[m.id for m in app_info.team.members]}")
+    else:
+        print(f"SkynetV2 Web: Bot owner check - user: {user_id}, bot owner: {getattr(app_info.owner, 'id', 'unknown')}")
+    
+    if is_owner:
         print("SkynetV2 Web: User is bot owner - granting full access")
         permissions['bot_owner'] = True
         # For bot owners, store only first 50 guilds to avoid cookie size limits

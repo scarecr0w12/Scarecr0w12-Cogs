@@ -34,93 +34,198 @@ async def dashboard(request: web.Request):
     admin_guilds = len(perms.get('guild_admin', []))
     is_bot_owner = perms.get('bot_owner', False)
     
-    # Build guild table with enhanced information
-    rows = []
-    for gid in perms.get('guilds', []):
-        g = webiface.cog.bot.get_guild(int(gid))
-        if not g: continue
-        
-        # Get guild status
-        try:
-            config = webiface.cog.config.guild(g)
-            enabled = await config.enabled()
-            listening_cfg = await config.listening()
-            listening_enabled = listening_cfg.get('enabled', False)
-        except:
-            enabled = True
-            listening_enabled = False
-        
-        is_admin = str(gid) in perms.get('guild_admin', [])
-        admin_badge = '<span class="status-badge status-enabled">Admin</span>' if is_admin else '<span class="status-badge status-disabled">Member</span>'
-        status_badge = '<span class="status-badge status-enabled">Active</span>' if enabled else '<span class="status-badge status-disabled">Disabled</span>'
-        listening_badge = '<span class="status-badge status-enabled">Listening</span>' if listening_enabled else ''
-        
-        action_buttons = f'''
-            <a href="/guild/{g.id}" class="button secondary">Dashboard</a>
-            {f'<a href="/config/{g.id}" class="button">Configure</a>' if is_admin else ''}
-        '''
-        
-        rows.append(f"""
-            <tr>
-                <td><strong>{g.name}</strong><br><small>{g.member_count} members</small></td>
-                <td>{admin_badge}</td>
-                <td>{status_badge} {listening_badge}</td>
-                <td>{action_buttons}</td>
-            </tr>
-        """)
-    
-    guild_table = f"""
-        <table>
-            <tr><th>Guild</th><th>Role</th><th>Status</th><th>Actions</th></tr>
-            {''.join(rows) if rows else '<tr><td colspan="4">(no accessible guilds)</td></tr>'}
-        </table>
+    # Breadcrumb
+    breadcrumb = """
+    <div class="breadcrumb">
+        <span>🏠 Dashboard</span>
+    </div>
     """
     
-    # Quick stats card
-    stats_card = f"""
-    <div class='card'>
-        <h2>Overview</h2>
-        <div class='form-row'>
-            <div>
-                <strong>Accessible Guilds:</strong> {accessible_guilds}
-                <br><small>Admin on {admin_guilds} guilds</small>
+    # Welcome message
+    welcome_card = f"""
+    <div class="card">
+        <div class="card-header">
+            <h2>Welcome back, {user.get('username')}!</h2>
+        </div>
+        <div class="card-body">
+            <p>Manage your SkynetV2 AI assistant configuration across your Discord servers.</p>
+            {f'<div class="alert alert-info">✨ You have <strong>Bot Owner</strong> privileges with full access to all features.</div>' if is_bot_owner else ''}
+        </div>
+    </div>
+    """
+    
+    # Quick stats
+    stats_grid = f"""
+    <div class="grid grid-cols-3">
+        <div class="card">
+            <div class="card-body">
+                <h3>🏠 Accessible Guilds</h3>
+                <div style="font-size: 2rem; font-weight: 600; color: #3b82f6;">{accessible_guilds}</div>
+                <p style="color: #6b7280; margin: 0;">Out of {total_guilds} total bot guilds</p>
             </div>
-            <div>
-                <strong>Bot Status:</strong> {'Bot Owner' if is_bot_owner else 'User'}
-                <br><small>Total bot guilds: {total_guilds}</small>
+        </div>
+        <div class="card">
+            <div class="card-body">
+                <h3>🛡️ Admin Access</h3>
+                <div style="font-size: 2rem; font-weight: 600; color: #16a34a;">{admin_guilds}</div>
+                <p style="color: #6b7280; margin: 0;">Guilds with admin permissions</p>
+            </div>
+        </div>
+        <div class="card">
+            <div class="card-body">
+                <h3>👑 Access Level</h3>
+                <div class="status-badge status-{'enabled' if is_bot_owner else 'warning'}" style="font-size: 1.1rem;">
+                    {'Bot Owner' if is_bot_owner else 'Guild User'}
+                </div>
+                <p style="color: #6b7280; margin: 0.5rem 0 0 0;">Current permission level</p>
             </div>
         </div>
     </div>
     """
     
-    # Quick actions for bot owners
+    # Build guild cards with better organization
+    guild_cards = ""
+    if accessible_guilds > 0:
+        guild_cards = "<h2 style='margin: 2rem 0 1rem 0;'>🌐 Your Guilds</h2>"
+        
+        # Group guilds by admin status
+        admin_guilds_list = []
+        member_guilds_list = []
+        
+        for gid in perms.get('guilds', []):
+            g = webiface.cog.bot.get_guild(int(gid))
+            if not g: continue
+            
+            # Get guild status
+            try:
+                config = webiface.cog.config.guild(g)
+                enabled = await config.enabled()
+                listening_cfg = await config.listening()
+                listening_enabled = listening_cfg.get('enabled', False)
+            except:
+                enabled = True
+                listening_enabled = False
+            
+            is_admin = str(gid) in perms.get('guild_admin', [])
+            
+            # Create guild card
+            status_badges = f"""
+                <span class="status-badge status-{'enabled' if enabled else 'disabled'}">
+                    {'🟢 Active' if enabled else '🔴 Disabled'}
+                </span>
+                {f'<span class="status-badge status-enabled">🎧 Listening</span>' if listening_enabled else ''}
+            """
+            
+            action_buttons = f"""
+                <div style="margin-top: 1rem; display: flex; gap: 0.5rem;">
+                    <button onclick="location.href='/guild/{g.id}'" class="btn-outline btn-sm">
+                        📊 Dashboard
+                    </button>
+                    {f'''<button onclick="location.href='/config/{g.id}'" class="btn-sm">⚙️ Configure</button>''' if is_admin else ''}
+                    {f'''<button onclick="location.href='/guild/{g.id}/channels'" class="btn-secondary btn-sm">📝 Channels</button>''' if is_admin else ''}
+                </div>
+            """
+            
+            guild_card = f"""
+            <div class="card">
+                <div class="card-body">
+                    <div class="form-row" style="margin-bottom: 1rem;">
+                        <div>
+                            <h3 style="margin: 0;">{g.name}</h3>
+                            <p style="margin: 0; color: #6b7280; font-size: 0.875rem;">
+                                👥 {g.member_count} members • ID: {g.id}
+                            </p>
+                        </div>
+                        <div>
+                            <span class="status-badge status-{'enabled' if is_admin else 'warning'}">
+                                {'🛡️ Admin' if is_admin else '👤 Member'}
+                            </span>
+                        </div>
+                    </div>
+                    <div style="margin: 0.5rem 0;">
+                        {status_badges}
+                    </div>
+                    {action_buttons}
+                </div>
+            </div>
+            """
+            
+            if is_admin:
+                admin_guilds_list.append(guild_card)
+            else:
+                member_guilds_list.append(guild_card)
+        
+        # Render admin guilds first
+        if admin_guilds_list:
+            guild_cards += f"""
+            <div class="card">
+                <div class="card-header">
+                    <h3>🛡️ Administrator Access ({len(admin_guilds_list)})</h3>
+                </div>
+            </div>
+            <div class="grid grid-cols-2">
+                {''.join(admin_guilds_list)}
+            </div>
+            """
+        
+        # Then member guilds
+        if member_guilds_list:
+            guild_cards += f"""
+            <div class="card" style="margin-top: 1rem;">
+                <div class="card-header">
+                    <h3>👤 Member Access ({len(member_guilds_list)})</h3>
+                </div>
+            </div>
+            <div class="grid grid-cols-2">
+                {''.join(member_guilds_list)}
+            </div>
+            """
+    else:
+        guild_cards = f"""
+        <div class="card">
+            <div class="card-body">
+                <h3>No Accessible Guilds</h3>
+                <p>You don't have access to any guilds where this bot is installed.</p>
+                <div class="alert alert-info">
+                    <strong>💡 Tip:</strong> Make sure you have appropriate permissions in Discord servers where SkynetV2 is installed.
+                </div>
+            </div>
+        </div>
+        """
+    
+    # Bot owner actions
     owner_actions = ""
     if is_bot_owner:
         owner_actions = f"""
-        <div class='card'>
-            <h2>Bot Owner Actions</h2>
-            <button onclick="location.href='/global-config'" class="secondary">🌐 Global Configuration</button>
-            <button onclick="location.href='/bot-stats'" class="secondary">📊 Bot Statistics</button>
-            <button onclick="location.href='/logs'" class="secondary">📋 View Logs</button>
+        <div class="card">
+            <div class="card-header">
+                <h2>👑 Bot Owner Actions</h2>
+            </div>
+            <div class="card-body">
+                <div class="grid grid-cols-3">
+                    <button onclick="location.href='/global-config'" class="btn-secondary">
+                        🌐 Global Configuration
+                    </button>
+                    <button onclick="location.href='/bot-stats'" class="btn-secondary">
+                        📊 Bot Statistics
+                    </button>
+                    <button onclick="location.href='/logs'" class="btn-secondary">
+                        📋 View Logs
+                    </button>
+                </div>
+            </div>
         </div>
         """
     
     body = f"""
-    <h1>SkynetV2 Dashboard</h1>
-    <div class='card'>
-        <p>Welcome back, <strong>{user.get('username')}</strong>!</p>
-        <p>Manage your SkynetV2 bot configuration across your Discord servers.</p>
-    </div>
-    
-    {stats_card}
+    {breadcrumb}
+    {welcome_card}
+    {stats_grid}
     {owner_actions}
-    
-    <div class='card'>
-        <h2>Your Guilds</h2>
-        {guild_table}
-    </div>
+    {guild_cards}
     """
-    return web.Response(text=_html_base('Dashboard', body), content_type='text/html')
+    
+    return web.Response(text=_html_base('Dashboard', body, 'dashboard'), content_type='text/html')
 
 async def profile(request: web.Request):
     user, resp = await _require_session(request)
@@ -1129,48 +1234,265 @@ async def handle_member_prompt(request: web.Request):
     except Exception as e:
         return web.json_response({'success': False, 'error': str(e)})
 
-BASE_STYLE = "body{font-family:Segoe UI,Arial,sans-serif;margin:20px;background:#f5f7fb;color:#222}a{color:#3366cc;text-decoration:none}nav a{margin-right:12px}.card{background:#fff;padding:16px;border-radius:8px;box-shadow:0 2px 6px rgba(0,0,0,0.06);margin:12px 0}table{border-collapse:collapse;width:100%}th,td{text-align:left;padding:6px 8px;border-bottom:1px solid #eee;font-size:14px}th{background:#fafafa}code{background:#eef;padding:2px 4px;border-radius:4px;font-size:90%}input,select,textarea{padding:8px;border:1px solid #ddd;border-radius:4px;font-family:inherit;font-size:14px;width:100%;box-sizing:border-box}button{background:#5865F2;color:white;border:none;padding:10px 16px;border-radius:4px;cursor:pointer;font-size:14px;margin:4px 2px}button:hover{background:#4752C4}button.secondary{background:#6c757d}button.secondary:hover{background:#545b62}button.danger{background:#dc3545}button.danger:hover{background:#c82333}button.success{background:#28a745}button.success:hover{background:#218838}.form-group{margin:12px 0}.form-row{display:flex;gap:12px;align-items:center}.form-row > *{flex:1}.toggle{display:inline-block;width:50px;height:24px;background:#ccc;border-radius:12px;position:relative;cursor:pointer}.toggle.on{background:#28a745}.toggle::after{content:'';width:20px;height:20px;border-radius:50%;background:white;position:absolute;top:2px;left:2px;transition:0.2s}.toggle.on::after{left:28px}.status-badge{padding:2px 8px;border-radius:12px;font-size:12px;font-weight:500}.status-enabled{background:#d4edda;color:#155724}.status-disabled{background:#f8d7da;color:#721c24}"
+BASE_STYLE = """
+body{font-family:'Segoe UI',system-ui,-apple-system,sans-serif;margin:0;background:#f8fafc;color:#1e293b;line-height:1.6}
+header{background:#1e40af;color:white;padding:1rem 2rem;box-shadow:0 2px 4px rgba(0,0,0,0.1)}
+header h1{margin:0;font-size:1.5rem;font-weight:600}
+nav{background:#3b82f6;padding:0.75rem 2rem;box-shadow:0 1px 3px rgba(0,0,0,0.1)}
+nav a{color:white;text-decoration:none;margin-right:1.5rem;padding:0.5rem 1rem;border-radius:0.375rem;transition:background 0.2s}
+nav a:hover{background:rgba(255,255,255,0.1)}
+nav a.active{background:rgba(255,255,255,0.2)}
+.container{max-width:1200px;margin:0 auto;padding:2rem}
+.card{background:white;border-radius:0.75rem;box-shadow:0 4px 6px rgba(0,0,0,0.07);border:1px solid #e2e8f0;overflow:hidden;margin-bottom:1.5rem}
+.card-header{background:#f8fafc;border-bottom:1px solid #e2e8f0;padding:1rem 1.5rem}
+.card-header h2{margin:0;font-size:1.25rem;font-weight:600;color:#374151}
+.card-header h3{margin:0;font-size:1.1rem;font-weight:500;color:#6b7280}
+.card-body{padding:1.5rem}
+.tabs{display:flex;border-bottom:1px solid #e2e8f0;background:#f8fafc}
+.tab{padding:1rem 1.5rem;cursor:pointer;border-bottom:2px solid transparent;transition:all 0.2s;color:#6b7280;font-weight:500}
+.tab:hover{color:#374151;background:#f1f5f9}
+.tab.active{color:#3b82f6;border-bottom-color:#3b82f6;background:white}
+.tab-content{display:none;padding:1.5rem}
+.tab-content.active{display:block}
+table{width:100%;border-collapse:collapse;margin-top:1rem}
+th,td{text-align:left;padding:0.75rem;border-bottom:1px solid #e2e8f0}
+th{background:#f8fafc;font-weight:600;color:#374151}
+tr:hover{background:#f8fafc}
+.form-group{margin-bottom:1.5rem}
+.form-row{display:flex;gap:1rem;align-items:center;margin-bottom:1rem}
+.form-row > label{min-width:150px;font-weight:500;color:#374151}
+input,select,textarea{padding:0.75rem;border:2px solid #e2e8f0;border-radius:0.5rem;font-family:inherit;font-size:0.875rem;transition:border-color 0.2s;background:white}
+input:focus,select:focus,textarea:focus{outline:none;border-color:#3b82f6;box-shadow:0 0 0 3px rgba(59,130,246,0.1)}
+button{background:#3b82f6;color:white;border:none;padding:0.75rem 1.5rem;border-radius:0.5rem;cursor:pointer;font-size:0.875rem;font-weight:500;transition:all 0.2s;display:inline-flex;align-items:center;gap:0.5rem}
+button:hover{background:#2563eb;transform:translateY(-1px)}
+button:active{transform:translateY(0)}
+.btn-secondary{background:#6b7280;color:white}
+.btn-secondary:hover{background:#4b5563}
+.btn-danger{background:#dc2626}
+.btn-danger:hover{background:#b91c1c}
+.btn-success{background:#16a34a}
+.btn-success:hover{background:#15803d}
+.btn-outline{background:transparent;color:#3b82f6;border:2px solid #3b82f6}
+.btn-outline:hover{background:#3b82f6;color:white}
+.btn-sm{padding:0.5rem 1rem;font-size:0.8rem}
+.toggle{position:relative;display:inline-block;width:3rem;height:1.5rem;background:#e2e8f0;border-radius:0.75rem;cursor:pointer;transition:background 0.2s}
+.toggle.on{background:#16a34a}
+.toggle::after{content:'';width:1.25rem;height:1.25rem;border-radius:50%;background:white;position:absolute;top:0.125rem;left:0.125rem;transition:transform 0.2s;box-shadow:0 2px 4px rgba(0,0,0,0.2)}
+.toggle.on::after{transform:translateX(1.5rem)}
+.status-badge{display:inline-flex;align-items:center;padding:0.25rem 0.75rem;border-radius:9999px;font-size:0.75rem;font-weight:600;text-transform:uppercase;letter-spacing:0.05em}
+.status-enabled{background:#dcfce7;color:#166534}
+.status-disabled{background:#fee2e2;color:#991b1b}
+.status-warning{background:#fef3c7;color:#92400e}
+.grid{display:grid;gap:1.5rem}
+.grid-cols-2{grid-template-columns:repeat(2,1fr)}
+.grid-cols-3{grid-template-columns:repeat(3,1fr)}
+.dropdown{position:relative;display:inline-block}
+.dropdown-trigger{background:#f8fafc;border:2px solid #e2e8f0;border-radius:0.5rem;padding:0.75rem 1rem;cursor:pointer;display:flex;align-items:center;justify-content:space-between;min-width:200px}
+.dropdown-trigger:hover{border-color:#3b82f6}
+.dropdown-content{position:absolute;top:100%;left:0;right:0;background:white;border:2px solid #e2e8f0;border-radius:0.5rem;box-shadow:0 10px 15px rgba(0,0,0,0.1);z-index:1000;max-height:300px;overflow-y:auto;display:none}
+.dropdown.active .dropdown-content{display:block}
+.dropdown-item{padding:0.75rem 1rem;cursor:pointer;border-bottom:1px solid #f1f5f9;transition:background 0.1s}
+.dropdown-item:hover{background:#f8fafc}
+.dropdown-item:last-child{border-bottom:none}
+.alert{padding:1rem;border-radius:0.5rem;margin-bottom:1rem;border-left:4px solid}
+.alert-info{background:#dbeafe;border-color:#3b82f6;color:#1e40af}
+.alert-success{background:#dcfce7;border-color:#16a34a;color:#166534}
+.alert-warning{background:#fef3c7;border-color:#f59e0b;color:#92400e}
+.alert-danger{background:#fee2e2;border-color:#dc2626;color:#991b1b}
+.loading{display:inline-block;width:1rem;height:1rem;border:2px solid #e2e8f0;border-top:2px solid #3b82f6;border-radius:50%;animation:spin 1s linear infinite}
+@keyframes spin{0%{transform:rotate(0deg)}100%{transform:rotate(360deg)}}
+.breadcrumb{display:flex;align-items:center;margin-bottom:1.5rem;color:#6b7280;font-size:0.875rem}
+.breadcrumb a{color:#3b82f6;text-decoration:none}
+.breadcrumb a:hover{text-decoration:underline}
+.breadcrumb-separator{margin:0 0.5rem}
+@media(max-width:768px){
+  .container{padding:1rem}
+  .form-row{flex-direction:column;align-items:stretch}
+  .grid-cols-2,.grid-cols-3{grid-template-columns:1fr}
+  nav{padding:0.5rem 1rem}
+  nav a{margin-right:0.75rem;padding:0.25rem 0.5rem}
+}
+"""
 
-def _html_base(title: str, body: str) -> str:
-    return f"""<!DOCTYPE html><html><head><meta charset='utf-8'><title>{title}</title>
-<style>{BASE_STYLE}</style>
-<script>
-function toggleSetting(guildId, setting, value) {{
-    fetch(`/api/guild/${{guildId}}/toggle`, {{
-        method: 'POST',
-        headers: {{'Content-Type': 'application/json'}},
-        body: JSON.stringify({{setting: setting, value: value}})
-    }})
-    .then(r => r.json())
-    .then(data => {{
-        if (data.success) location.reload();
-        else alert('Error: ' + data.error);
-    }})
-    .catch(e => alert('Error: ' + e));
-}}
-function submitForm(formId) {{
-    const form = document.getElementById(formId);
-    const formData = new FormData(form);
-    const data = Object.fromEntries(formData.entries());
+def _html_base(title: str, body: str, current_page: str = '') -> str:
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{title} - SkynetV2</title>
+    <style>{BASE_STYLE}</style>
+    <script>
+    // Enhanced JavaScript for better UX
+    function toggleSetting(guildId, setting, value) {{
+        const btn = event.target;
+        btn.disabled = true;
+        btn.innerHTML = '<div class="loading"></div> Saving...';
+        
+        fetch(`/api/guild/${{guildId}}/toggle`, {{
+            method: 'POST',
+            headers: {{'Content-Type': 'application/json'}},
+            body: JSON.stringify({{setting: setting, value: value}})
+        }})
+        .then(r => r.json())
+        .then(data => {{
+            if (data.success) {{
+                location.reload();
+            }} else {{
+                showAlert('Error: ' + data.error, 'danger');
+                btn.disabled = false;
+                btn.innerHTML = btn.getAttribute('data-original-text') || 'Toggle';
+            }}
+        }})
+        .catch(e => {{
+            showAlert('Error: ' + e, 'danger');
+            btn.disabled = false;
+            btn.innerHTML = btn.getAttribute('data-original-text') || 'Toggle';
+        }});
+    }}
     
-    fetch(form.action, {{
-        method: 'POST',
-        headers: {{'Content-Type': 'application/json'}},
-        body: JSON.stringify(data)
-    }})
-    .then(r => r.json())
-    .then(result => {{
-        if (result.success) {{
-            alert('Settings saved successfully!');
-            location.reload();
-        }} else {{
-            alert('Error: ' + result.error);
+    function submitForm(formId) {{
+        const form = document.getElementById(formId);
+        const formData = new FormData(form);
+        const data = Object.fromEntries(formData.entries());
+        const submitBtn = form.querySelector('button[type="submit"]');
+        
+        if (submitBtn) {{
+            submitBtn.disabled = true;
+            submitBtn.innerHTML = '<div class="loading"></div> Saving...';
         }}
-    }})
-    .catch(e => alert('Error: ' + e));
-}}
-</script>
-</head><body><nav><a href='/dashboard'>Dashboard</a><a href='/profile'>Profile</a><a href='/logout'>Logout</a></nav>{body}</body></html>"""
+        
+        fetch(form.action, {{
+            method: 'POST',
+            headers: {{'Content-Type': 'application/json'}},
+            body: JSON.stringify(data)
+        }})
+        .then(r => r.json())
+        .then(result => {{
+            if (result.success) {{
+                showAlert('Settings saved successfully!', 'success');
+                setTimeout(() => location.reload(), 1500);
+            }} else {{
+                showAlert('Error: ' + result.error, 'danger');
+                if (submitBtn) {{
+                    submitBtn.disabled = false;
+                    submitBtn.innerHTML = submitBtn.getAttribute('data-original-text') || 'Save';
+                }}
+            }}
+        }})
+        .catch(e => {{
+            showAlert('Error: ' + e, 'danger');
+            if (submitBtn) {{
+                submitBtn.disabled = false;
+                submitBtn.innerHTML = submitBtn.getAttribute('data-original-text') || 'Save';
+            }}
+        }});
+    }}
+    
+    function showAlert(message, type) {{
+        const alert = document.createElement('div');
+        alert.className = `alert alert-${{type}}`;
+        alert.innerHTML = message;
+        alert.style.position = 'fixed';
+        alert.style.top = '20px';
+        alert.style.right = '20px';
+        alert.style.zIndex = '9999';
+        alert.style.minWidth = '300px';
+        document.body.appendChild(alert);
+        
+        setTimeout(() => alert.remove(), 5000);
+    }}
+    
+    function switchTab(tabName) {{
+        // Hide all tab contents
+        document.querySelectorAll('.tab-content').forEach(content => {{
+            content.classList.remove('active');
+        }});
+        
+        // Remove active class from all tabs
+        document.querySelectorAll('.tab').forEach(tab => {{
+            tab.classList.remove('active');
+        }});
+        
+        // Show selected tab content
+        const targetContent = document.getElementById(tabName + '-content');
+        if (targetContent) {{
+            targetContent.classList.add('active');
+        }}
+        
+        // Add active class to clicked tab
+        const targetTab = document.querySelector(`[onclick="switchTab('${{tabName}}')"]`);
+        if (targetTab) {{
+            targetTab.classList.add('active');
+        }}
+        
+        // Save active tab in localStorage
+        localStorage.setItem('activeTab', tabName);
+    }}
+    
+    function toggleDropdown(dropdownId) {{
+        const dropdown = document.getElementById(dropdownId);
+        const isActive = dropdown.classList.contains('active');
+        
+        // Close all dropdowns
+        document.querySelectorAll('.dropdown').forEach(d => d.classList.remove('active'));
+        
+        // Toggle clicked dropdown
+        if (!isActive) {{
+            dropdown.classList.add('active');
+        }}
+    }}
+    
+    // Initialize page when DOM loads
+    document.addEventListener('DOMContentLoaded', function() {{
+        // Restore active tab from localStorage
+        const activeTab = localStorage.getItem('activeTab');
+        if (activeTab) {{
+            switchTab(activeTab);
+        }} else {{
+            // Activate first tab by default
+            const firstTab = document.querySelector('.tab');
+            if (firstTab) {{
+                const tabName = firstTab.getAttribute('onclick').match(/switchTab\\('([^']+)'\\)/)[1];
+                switchTab(tabName);
+            }}
+        }}
+        
+        // Close dropdowns when clicking outside
+        document.addEventListener('click', function(e) {{
+            if (!e.target.closest('.dropdown')) {{
+                document.querySelectorAll('.dropdown').forEach(d => d.classList.remove('active'));
+            }}
+        }});
+        
+        // Store original button text for restoration
+        document.querySelectorAll('button').forEach(btn => {{
+            btn.setAttribute('data-original-text', btn.innerHTML);
+        }});
+        
+        // Add current page class to nav
+        const currentPage = '{current_page}';
+        if (currentPage) {{
+            const navLink = document.querySelector(`nav a[href*="${{currentPage}}"]`);
+            if (navLink) navLink.classList.add('active');
+        }}
+    }});
+    </script>
+</head>
+<body>
+    <header>
+        <h1>🤖 SkynetV2 Web Interface</h1>
+    </header>
+    <nav>
+        <a href="/dashboard">📊 Dashboard</a>
+        <a href="/profile">👤 Profile</a>
+        <a href="/logout">🚪 Logout</a>
+    </nav>
+    <div class="container">
+        {body}
+    </div>
+</body>
+</html>"""
 
 def setup(webiface):
     app = webiface.app

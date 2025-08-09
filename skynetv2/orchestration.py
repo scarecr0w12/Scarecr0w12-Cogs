@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import json
 import time
+import re
+from datetime import datetime
 from dataclasses import dataclass, asdict
 from typing import Dict, Any, List, Optional, Union
 
@@ -17,6 +19,15 @@ try:
     import discord
 except ImportError:
     discord = None  # Handle import in Red environment
+
+try:
+    from .logging_system import log_info, log_error_event
+except ImportError:
+    # Fallback logging functions
+    async def log_info(message: str, **kwargs):
+        pass
+    async def log_error_event(guild, user, channel, message: str):
+        pass
 
 
 @dataclass
@@ -110,6 +121,372 @@ class ToolResult:
     def to_json(self) -> str:
         """Serialize to JSON string."""
         return json.dumps(asdict(self), indent=2)
+
+
+@dataclass
+class Variable:
+    """Represents a contextual variable that can be injected into prompts."""
+    name: str
+    description: str
+    value_type: str  # "string", "datetime", "user", "channel", "guild"
+    category: str = "general"  # general, time, user, server, system
+    requires_guild: bool = False
+    requires_user: bool = False
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary representation."""
+        return asdict(self)
+
+
+class VariableResolver:
+    """Resolves contextual variables for prompt injection."""
+    
+    def __init__(self, cog):
+        self.cog = cog
+        self._variables: Dict[str, Variable] = {}
+        self._initialize_variables()
+    
+    def _initialize_variables(self):
+        """Initialize available variables."""
+        # Time variables
+        self._variables["timestamp"] = Variable(
+            name="timestamp",
+            description="Current timestamp in ISO format",
+            value_type="datetime",
+            category="time"
+        )
+        
+        self._variables["time"] = Variable(
+            name="time",
+            description="Current time in HH:MM format",
+            value_type="string",
+            category="time"
+        )
+        
+        self._variables["date"] = Variable(
+            name="date",
+            description="Current date in YYYY-MM-DD format",
+            value_type="string",
+            category="time"
+        )
+        
+        self._variables["datetime"] = Variable(
+            name="datetime",
+            description="Current date and time in readable format",
+            value_type="string",
+            category="time"
+        )
+        
+        # User variables
+        self._variables["user_name"] = Variable(
+            name="user_name",
+            description="Username of the current user",
+            value_type="string",
+            category="user",
+            requires_user=True
+        )
+        
+        self._variables["user_display_name"] = Variable(
+            name="user_display_name",
+            description="Display name (nickname or username) of the current user in the server",
+            value_type="string",
+            category="user",
+            requires_user=True,
+            requires_guild=True
+        )
+        
+        self._variables["user_mention"] = Variable(
+            name="user_mention",
+            description="Mentionable string for the current user",
+            value_type="string",
+            category="user",
+            requires_user=True
+        )
+        
+        self._variables["user_id"] = Variable(
+            name="user_id",
+            description="Discord ID of the current user",
+            value_type="string",
+            category="user",
+            requires_user=True
+        )
+        
+        self._variables["user_joined"] = Variable(
+            name="user_joined",
+            description="Date when the user joined the server",
+            value_type="string",
+            category="user",
+            requires_user=True,
+            requires_guild=True
+        )
+        
+        # Server/Guild variables
+        self._variables["server_name"] = Variable(
+            name="server_name",
+            description="Name of the current Discord server",
+            value_type="string",
+            category="server",
+            requires_guild=True
+        )
+        
+        self._variables["server_id"] = Variable(
+            name="server_id",
+            description="Discord ID of the current server",
+            value_type="string",
+            category="server",
+            requires_guild=True
+        )
+        
+        self._variables["server_member_count"] = Variable(
+            name="server_member_count",
+            description="Number of members in the current server",
+            value_type="string",
+            category="server",
+            requires_guild=True
+        )
+        
+        self._variables["channel_name"] = Variable(
+            name="channel_name",
+            description="Name of the current channel",
+            value_type="string",
+            category="server",
+            requires_guild=True
+        )
+        
+        self._variables["channel_id"] = Variable(
+            name="channel_id",
+            description="Discord ID of the current channel",
+            value_type="string",
+            category="server",
+            requires_guild=True
+        )
+        
+        self._variables["channel_mention"] = Variable(
+            name="channel_mention",
+            description="Mentionable string for the current channel",
+            value_type="string",
+            category="server",
+            requires_guild=True
+        )
+        
+        # System variables
+        self._variables["bot_name"] = Variable(
+            name="bot_name",
+            description="Name of the bot",
+            value_type="string",
+            category="system"
+        )
+        
+        self._variables["bot_mention"] = Variable(
+            name="bot_mention",
+            description="Mentionable string for the bot",
+            value_type="string",
+            category="system"
+        )
+        
+        self._variables["command_prefix"] = Variable(
+            name="command_prefix",
+            description="Command prefix for the bot in this server",
+            value_type="string",
+            category="system",
+            requires_guild=True
+        )
+        
+        # Additional contextual variables
+        self._variables["weekday"] = Variable(
+            name="weekday",
+            description="Current day of the week (Monday, Tuesday, etc.)",
+            value_type="string",
+            category="time"
+        )
+        
+        self._variables["user_created"] = Variable(
+            name="user_created",
+            description="Date when the user's Discord account was created",
+            value_type="string",
+            category="user",
+            requires_user=True
+        )
+        
+        self._variables["user_avatar"] = Variable(
+            name="user_avatar",
+            description="URL of the user's avatar image",
+            value_type="string",
+            category="user",
+            requires_user=True
+        )
+        
+        self._variables["server_created"] = Variable(
+            name="server_created",
+            description="Date when the server was created",
+            value_type="string",
+            category="server",
+            requires_guild=True
+        )
+        
+        self._variables["server_owner"] = Variable(
+            name="server_owner",
+            description="Name of the server owner",
+            value_type="string",
+            category="server",
+            requires_guild=True
+        )
+    
+    async def resolve_variable(self, var_name: str, guild=None, channel=None, user=None) -> Optional[str]:
+        """Resolve a single variable to its value."""
+        if var_name not in self._variables:
+            return None
+        
+        variable = self._variables[var_name]
+        
+        # Check requirements
+        if variable.requires_guild and not guild:
+            return f"[{var_name}: requires guild context]"
+        if variable.requires_user and not user:
+            return f"[{var_name}: requires user context]"
+        
+        try:
+            # Time variables
+            if var_name == "timestamp":
+                return datetime.now().isoformat()
+            elif var_name == "time":
+                return datetime.now().strftime("%H:%M")
+            elif var_name == "date":
+                return datetime.now().strftime("%Y-%m-%d")
+            elif var_name == "datetime":
+                return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            elif var_name == "weekday":
+                return datetime.now().strftime("%A")
+            
+            # User variables
+            elif var_name == "user_name" and user:
+                return str(user.name)
+            elif var_name == "user_display_name" and user and guild:
+                member = guild.get_member(user.id)
+                return member.display_name if member else str(user.name)
+            elif var_name == "user_mention" and user:
+                return user.mention
+            elif var_name == "user_id" and user:
+                return str(user.id)
+            elif var_name == "user_joined" and user and guild:
+                member = guild.get_member(user.id)
+                if member and member.joined_at:
+                    return member.joined_at.strftime("%Y-%m-%d")
+                return "Unknown"
+            elif var_name == "user_created" and user:
+                if hasattr(user, 'created_at') and user.created_at:
+                    return user.created_at.strftime("%Y-%m-%d")
+                return "Unknown"
+            elif var_name == "user_avatar" and user:
+                if hasattr(user, 'display_avatar'):
+                    return str(user.display_avatar.url)
+                elif hasattr(user, 'avatar_url'):
+                    return str(user.avatar_url)
+                return "No avatar"
+            
+            # Server variables
+            elif var_name == "server_name" and guild:
+                return guild.name
+            elif var_name == "server_id" and guild:
+                return str(guild.id)
+            elif var_name == "server_member_count" and guild:
+                return str(guild.member_count or 0)
+            elif var_name == "server_created" and guild:
+                if hasattr(guild, 'created_at') and guild.created_at:
+                    return guild.created_at.strftime("%Y-%m-%d")
+                return "Unknown"
+            elif var_name == "server_owner" and guild:
+                if hasattr(guild, 'owner') and guild.owner:
+                    return str(guild.owner.name)
+                return "Unknown"
+            elif var_name == "channel_name" and channel:
+                return channel.name if hasattr(channel, 'name') else "Unknown"
+            elif var_name == "channel_id" and channel:
+                return str(channel.id)
+            elif var_name == "channel_mention" and channel:
+                return channel.mention if hasattr(channel, 'mention') else f"#{channel.name}"
+            
+            # System variables
+            elif var_name == "bot_name":
+                return self.cog.bot.user.name if self.cog.bot.user else "SkynetV2"
+            elif var_name == "bot_mention":
+                return self.cog.bot.user.mention if self.cog.bot.user else "@SkynetV2"
+            elif var_name == "command_prefix" and guild:
+                # Get command prefix for this guild
+                try:
+                    prefixes = await self.cog.bot.get_valid_prefixes(guild)
+                    return prefixes[0] if prefixes else "!"
+                except:
+                    return "!"
+            
+            return f"[{var_name}: unresolved]"
+            
+        except Exception as e:
+            await log_info(f"Error resolving variable {var_name}: {e}")
+            return f"[{var_name}: error]"
+    
+    async def resolve_prompt(self, prompt: str, guild=None, channel=None, user=None) -> str:
+        """Resolve all variables in a prompt string."""
+        if not prompt:
+            return prompt
+        
+        # Find all variable placeholders: {{variable_name}}
+        pattern = r'\{\{([a-zA-Z_][a-zA-Z0-9_]*)\}\}'
+        matches = re.findall(pattern, prompt)
+        
+        resolved_prompt = prompt
+        for var_name in matches:
+            placeholder = f"{{{{{var_name}}}}}"
+            value = await self.resolve_variable(var_name, guild, channel, user)
+            if value is not None:
+                resolved_prompt = resolved_prompt.replace(placeholder, value)
+        
+        return resolved_prompt
+    
+    def get_available_variables(self, guild=None, user=None) -> List[Variable]:
+        """Get list of available variables for the given context."""
+        available = []
+        
+        for variable in self._variables.values():
+            # Check if requirements are met
+            if variable.requires_guild and not guild:
+                continue
+            if variable.requires_user and not user:
+                continue
+            
+            available.append(variable)
+        
+        return available
+    
+    def get_variables_by_category(self, category: str, guild=None, user=None) -> List[Variable]:
+        """Get variables filtered by category."""
+        return [var for var in self.get_available_variables(guild, user) if var.category == category]
+    
+    def get_variables_help_text(self, guild=None, user=None) -> str:
+        """Generate help text for available variables."""
+        variables = self.get_available_variables(guild, user)
+        
+        if not variables:
+            return "No variables available in this context."
+        
+        # Group by category
+        categories = {}
+        for var in variables:
+            if var.category not in categories:
+                categories[var.category] = []
+            categories[var.category].append(var)
+        
+        help_text = "**Available Variables:**\n"
+        help_text += "Use `{{variable_name}}` in prompts to inject contextual data.\n\n"
+        
+        for category, vars_list in categories.items():
+            help_text += f"**{category.title()} Variables:**\n"
+            for var in vars_list:
+                help_text += f"• `{{{{{var.name}}}}}` - {var.description}\n"
+            help_text += "\n"
+        
+        help_text += "**Example:** `Hello {{user_display_name}}, the time is {{time}} on {{date}}.`"
+        return help_text
 
 
 class ToolOrchestrator:
@@ -300,3 +677,16 @@ class OrchestrationMixin:
     def _init_orchestration(self):
         """Initialize orchestration system."""
         self.orchestrator = ToolOrchestrator(self)
+        self.variable_resolver = VariableResolver(self)
+    
+    async def resolve_prompt_variables(self, prompt: str, guild=None, channel=None, user=None) -> str:
+        """Convenience method to resolve variables in prompts."""
+        if not hasattr(self, 'variable_resolver'):
+            self._init_orchestration()
+        return await self.variable_resolver.resolve_prompt(prompt, guild, channel, user)
+    
+    def get_available_variables_help(self, guild=None, user=None) -> str:
+        """Get help text for available variables."""
+        if not hasattr(self, 'variable_resolver'):
+            self._init_orchestration()
+        return self.variable_resolver.get_variables_help_text(guild, user)

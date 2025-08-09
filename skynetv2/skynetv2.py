@@ -19,6 +19,7 @@ from .tools import ToolsMixin
 from .stats import StatsMixin
 from .listener import ListenerMixin
 from .orchestration import OrchestrationMixin
+from .logging_system import log_config_change, log_error_event, log_ai_request
 from .error_handler import ErrorHandler
 from .web.server import WebServer  # modular web server
 
@@ -249,11 +250,20 @@ class SkynetV2(ToolsMixin, MemoryMixin, StatsMixin, ListenerMixin, Orchestration
             return
         async with ctx.typing():
             base = await self._memory_build_context(ctx.guild, ctx.channel.id, ctx.author)
+            
+            # Resolve variables in the message
+            resolved_message = await self.resolve_prompt_variables(message, ctx.guild, ctx.channel, ctx.author)
+            
             chunks = []
-            async for chunk in provider.chat(model=model_name, messages=base + [ChatMessage("user", message)]):
+            async for chunk in provider.chat(model=model_name, messages=base + [ChatMessage("user", resolved_message)]):
                 chunks.append(chunk)
             text = "".join(chunks) or "(no output)"
             last_usage = getattr(provider, "get_last_usage", lambda: None)()
+            
+            # Log the AI request with usage data
+            tokens_used = last_usage.get('total', 0) if last_usage else 0
+            await log_ai_request(ctx.guild, ctx.author, ctx.channel, provider_name, model_name, tokens_used)
+            
             if last_usage:
                 epoch_now = int(time.time())
                 async with self.config.guild(ctx.guild).usage() as usage:
@@ -368,6 +378,26 @@ class SkynetV2(ToolsMixin, MemoryMixin, StatsMixin, ListenerMixin, Orchestration
     async def ai_stats(self, ctx: commands.Context, top: Optional[int] = 5):
         text = await self._build_stats_text(ctx.guild, top_n=int(top or 5))
         await ctx.send(box(text, "yaml"))
+
+    @ai_group.command(name="variables")
+    async def ai_variables(self, ctx: commands.Context):
+        """Show available variables for prompt injection."""
+        help_text = self.get_available_variables_help(ctx.guild, ctx.author)
+        # Split into chunks to handle Discord's 2000 character limit
+        if len(help_text) > 1900:
+            parts = help_text.split('\n\n')
+            current_chunk = ""
+            for part in parts:
+                if len(current_chunk + part) > 1900:
+                    if current_chunk:
+                        await ctx.send(current_chunk)
+                    current_chunk = part + '\n\n'
+                else:
+                    current_chunk += part + '\n\n'
+            if current_chunk:
+                await ctx.send(current_chunk)
+        else:
+            await ctx.send(help_text)
 
     @ai_group.group(name="rate")
     @checks.admin_or_permissions(manage_guild=True)
@@ -634,13 +664,17 @@ class SkynetV2(ToolsMixin, MemoryMixin, StatsMixin, ListenerMixin, Orchestration
             await interaction.response.send_message(policy_err, ephemeral=True)
             return
         base = await self._memory_build_context(interaction.guild, interaction.channel.id, interaction.user)
+        
+        # Resolve variables in the message
+        resolved_message = await self.resolve_prompt_variables(message, interaction.guild, interaction.channel, interaction.user)
+        
         if stream:
             await interaction.response.defer(thinking=True)
             msg = await interaction.followup.send("…")
             buf = ""
             last_edit = 0.0
             try:
-                async for chunk in provider.chat(model=model_name, messages=base + [ChatMessage("user", message)], stream=True):
+                async for chunk in provider.chat(model=model_name, messages=base + [ChatMessage("user", resolved_message)], stream=True):
                     if not chunk:
                         continue
                     buf += chunk
@@ -673,11 +707,11 @@ class SkynetV2(ToolsMixin, MemoryMixin, StatsMixin, ListenerMixin, Orchestration
                         u["tokens_day_start"], u["tokens_day_total"] = epoch_now, 0
                     u["tokens_day_total"] = int(u.get("tokens_day_total", 0)) + int(last_usage.get("total", 0))
                 await self._estimate_and_record_cost(interaction.guild, provider_name, model_name, int(last_usage.get("prompt", 0)), int(last_usage.get("completion", 0)))
-            await self._memory_remember(interaction.guild, interaction.channel.id, message, buf)
+            await self._memory_remember(interaction.guild, interaction.channel.id, resolved_message, buf)
             return
         await interaction.response.defer(thinking=True)
         chunks = []
-        async for chunk in provider.chat(model=model_name, messages=base + [ChatMessage("user", message)]):
+        async for chunk in provider.chat(model=model_name, messages=base + [ChatMessage("user", resolved_message)]):
             chunks.append(chunk)
         text = "".join(chunks) or "(no output)"
         last_usage = getattr(provider, "get_last_usage", lambda: None)()
@@ -696,7 +730,7 @@ class SkynetV2(ToolsMixin, MemoryMixin, StatsMixin, ListenerMixin, Orchestration
                     u["tokens_day_start"], u["tokens_day_total"] = epoch_now, 0
                 u["tokens_day_total"] = int(u.get("tokens_day_total", 0)) + int(last_usage.get("total", 0))
             await self._estimate_and_record_cost(interaction.guild, provider_name, model_name, int(last_usage.get("prompt", 0)), int(last_usage.get("completion", 0)))
-        await self._memory_remember(interaction.guild, interaction.channel.id, message, text)
+        await self._memory_remember(interaction.guild, interaction.channel.id, resolved_message, text)
         await interaction.followup.send(text[:2000])
 
     @ai_slash.command(name="autosearch", description="Heuristic classify query -> mode + params (optionally execute search)")
@@ -712,6 +746,27 @@ class SkynetV2(ToolsMixin, MemoryMixin, StatsMixin, ListenerMixin, Orchestration
             return
         plan = await self._tool_run_autosearch(guild=interaction.guild, query=query, user=interaction.user, execute=bool(execute))
         await interaction.response.send_message(box(plan[:1800], "yaml"))
+
+    @ai_slash.command(name="variables", description="Show available variables for prompt injection")
+    async def slash_variables(self, interaction: discord.Interaction):
+        """Show available variables for prompt injection."""
+        help_text = self.get_available_variables_help(interaction.guild, interaction.user)
+        # Discord interaction responses have stricter limits, so we need to chunk more aggressively
+        if len(help_text) > 1800:
+            parts = help_text.split('\n\n')
+            current_chunk = ""
+            await interaction.response.send_message(f"**Variables Help (Part 1):**", ephemeral=True)
+            for i, part in enumerate(parts):
+                if len(current_chunk + part) > 1800:
+                    if current_chunk:
+                        await interaction.followup.send(current_chunk, ephemeral=True)
+                    current_chunk = part + '\n\n'
+                else:
+                    current_chunk += part + '\n\n'
+            if current_chunk:
+                await interaction.followup.send(current_chunk, ephemeral=True)
+        else:
+            await interaction.response.send_message(help_text, ephemeral=True)
 
     # Memory management slash commands
 
@@ -1014,6 +1069,15 @@ class SkynetV2(ToolsMixin, MemoryMixin, StatsMixin, ListenerMixin, Orchestration
         
         scope = "global" if is_global else "guild"
         await ctx.send(f"Set {provider} API key ({scope}). Key: {key[:8]}{'*' * (len(key) - 8)}")
+        
+        # Log the configuration change
+        await log_config_change(
+            ctx.guild if not is_global else None, 
+            ctx.author, 
+            ctx.channel,
+            f"API key set for {provider} ({scope})",
+            {"provider": provider.lower(), "scope": scope}
+        )
 
     @ai_provider_key.command(name="show")
     async def ai_provider_key_show(self, ctx: commands.Context):
@@ -1055,6 +1119,15 @@ class SkynetV2(ToolsMixin, MemoryMixin, StatsMixin, ListenerMixin, Orchestration
         
         scope = "global" if global_scope else "guild"
         await interaction.response.send_message(f"Set {provider} API key ({scope}).", ephemeral=True)
+        
+        # Log the configuration change
+        await log_config_change(
+            interaction.guild if not global_scope else None, 
+            interaction.user, 
+            interaction.channel,
+            f"API key set for {provider} ({scope})",
+            {"provider": provider.lower(), "scope": scope}
+        )
 
     # ----------------
     # Channel Listening Slash Commands
@@ -1277,7 +1350,7 @@ class SkynetV2(ToolsMixin, MemoryMixin, StatsMixin, ListenerMixin, Orchestration
     async def orchestrate(self, ctx: commands.Context):
         """Agent tool orchestration commands."""
         if not ctx.invoked_subcommand:
-            await self._send_help_embed(ctx, "orchestrate")
+            await ctx.send_help()
     
     @orchestrate.command(name="tools", aliases=["list"])
     async def orchestrate_tools(self, ctx: commands.Context):

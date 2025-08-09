@@ -2005,25 +2005,54 @@ async def logs_page(request: web.Request) -> web.Response:
     webiface = request.app['webiface']
     session = await get_session(request)
     user = session.get('user')
-    
+
     if not user or not user.get('permissions', {}).get('bot_owner'):
         return web.HTTPFound('/login')
-    
+
+    try:
+        # Import here to avoid circular imports
+        from ..logging_system import get_system_logs
+        
+        # Get recent system logs
+        logs = await get_system_logs(limit=50)
+        
+        logs_html = ""
+        if logs:
+            for log in logs:
+                level_class = f"log-{log.level.lower()}"
+                timestamp = log.timestamp.strftime("%Y-%m-%d %H:%M:%S")
+                guild_info = f"Guild: {log.guild_id}" if log.guild_id else "System"
+                user_info = f"User: {log.user_id}" if log.user_id else ""
+                channel_info = f"Channel: {log.channel_id}" if log.channel_id else ""
+                
+                extra_info = ""
+                if log.extra_data:
+                    extra_info = f"<div class='log-extra'><pre>{log.extra_data}</pre></div>"
+                
+                logs_html += f"""
+                <div class="log-entry {level_class}">
+                    <div class="log-header">
+                        <span class="log-timestamp">{timestamp}</span>
+                        <span class="log-level">{log.level}</span>
+                        <span class="log-context">{guild_info} {user_info} {channel_info}</span>
+                    </div>
+                    <div class="log-message">{log.message}</div>
+                    {extra_info}
+                </div>
+                """
+        else:
+            logs_html = "<div class='no-logs'>No logs found. Check that logging system is active.</div>"
+            
+    except Exception as e:
+        logs_html = f"<div class='error-logs'>Error loading logs: {e}</div>"
+
     body = f"""
     <div class='container'>
         <h1>📋 System Logs</h1>
         <div class='card'>
-            <h2>Recent Activity</h2>
-            <p><em>Log viewing functionality coming soon. Check your bot console for now.</em></p>
-            <div class='grid' style='grid-template-columns: 1fr 1fr;'>
-                <div>
-                    <h3>Web Access Logs</h3>
-                    <code>Check console output for authentication logs</code>
-                </div>
-                <div>
-                    <h3>AI Usage Logs</h3>
-                    <code>Check Red-DiscordBot logs for AI interactions</code>
-                </div>
+            <h2>Recent System Activity</h2>
+            <div class='logs-container' style='max-height: 600px; overflow-y: auto; background: #f5f5f5; padding: 1rem; border-radius: 8px;'>
+                {logs_html}
             </div>
         </div>
         
@@ -2032,11 +2061,55 @@ async def logs_page(request: web.Request) -> web.Response:
             <button onclick="location.href='/global-config'" class="btn-secondary">⚙️ Global Config</button>
             <button onclick="location.href='/bot-stats'" class="btn-secondary">📊 Bot Stats</button>
             <button onclick="location.href='/dashboard'" class="btn-secondary">← Back to Dashboard</button>
+            <button onclick="location.reload()" class="btn-primary">🔄 Refresh Logs</button>
         </div>
     </div>
-    """
     
+    <style>
+    .log-entry {{
+        margin-bottom: 0.5rem;
+        padding: 0.5rem;
+        border-left: 4px solid #ddd;
+        background: white;
+        border-radius: 4px;
+    }}
+    .log-entry.log-info {{ border-left-color: #2196F3; }}
+    .log-entry.log-warning {{ border-left-color: #FF9800; }}
+    .log-entry.log-error {{ border-left-color: #f44336; }}
+    .log-entry.log-debug {{ border-left-color: #9E9E9E; }}
+    .log-header {{
+        display: flex;
+        gap: 1rem;
+        font-size: 0.85rem;
+        color: #666;
+        margin-bottom: 0.25rem;
+    }}
+    .log-level {{
+        font-weight: bold;
+        text-transform: uppercase;
+    }}
+    .log-message {{
+        font-size: 0.9rem;
+        line-height: 1.4;
+    }}
+    .log-extra {{
+        margin-top: 0.5rem;
+        padding: 0.5rem;
+        background: #f8f8f8;
+        border-radius: 4px;
+        font-size: 0.8rem;
+    }}
+    .no-logs, .error-logs {{
+        text-align: center;
+        color: #666;
+        font-style: italic;
+        padding: 2rem;
+    }}
+    </style>
+    """
+
     return web.Response(text=_html_base('System Logs', body), content_type='text/html')
+
 
 async def guild_usage(request: web.Request) -> web.Response:
     """Guild usage statistics page"""
@@ -2061,63 +2134,87 @@ async def guild_usage(request: web.Request) -> web.Response:
     if not guild:
         return web.Response(text=_html_base('Guild Not Found', '<div class="card"><h1>Guild Not Found</h1></div>'), status=404, content_type='text/html')
     
+    try:
+        # Import here to avoid circular imports
+        from ..logging_system import get_guild_logs
+        
+        # Get guild-specific logs
+        logs = await get_guild_logs(guild_id=int(gid), limit=30)
+        
+        logs_html = ""
+        if logs:
+            for log in logs:
+                level_class = f"log-{log.level.lower()}"
+                timestamp = log.timestamp.strftime("%m-%d %H:%M:%S")
+                user_info = f"User: {log.user_id}" if log.user_id else ""
+                channel_info = f"Channel: {log.channel_id}" if log.channel_id else ""
+                
+                extra_info = ""
+                if log.extra_data:
+                    extra_info = f"<div class='log-extra'><small>{log.extra_data}</small></div>"
+                
+                logs_html += f"""
+                <div class="log-entry {level_class}">
+                    <div class="log-header">
+                        <span class="log-timestamp">{timestamp}</span>
+                        <span class="log-level">{log.level}</span>
+                        <span class="log-context">{user_info} {channel_info}</span>
+                    </div>
+                    <div class="log-message">{log.message}</div>
+                    {extra_info}
+                </div>
+                """
+        else:
+            logs_html = "<div class='no-logs'>No recent activity logs found for this guild.</div>"
+            
+        # Count different types of logs for stats
+        ai_requests = len([log for log in logs if log.extra_data and 'ai_request' in str(log.extra_data)])
+        config_changes = len([log for log in logs if log.extra_data and 'config_change' in str(log.extra_data)])
+        errors = len([log for log in logs if log.level == 'ERROR'])
+        
+    except Exception as e:
+        logs_html = f"<div class='error-logs'>Error loading logs: {e}</div>"
+        ai_requests = config_changes = errors = 0
+
     body = f"""
     <div class='container'>
-        <h1>📊 Usage Statistics - {guild.name}</h1>
+        <h1>📊 Activity & Usage - {guild.name}</h1>
+        
         <div class='card'>
-            <h2>AI Usage This Month</h2>
+            <h2>Recent Activity Summary</h2>
             <div class='stats-grid'>
                 <div class='stat-item'>
-                    <span class='stat-value'>147</span>
-                    <span class='stat-label'>Messages Processed</span>
+                    <span class='stat-value'>{ai_requests}</span>
+                    <span class='stat-label'>AI Requests</span>
                 </div>
                 <div class='stat-item'>
-                    <span class='stat-value'>2,341</span>
-                    <span class='stat-label'>Tokens Used</span>
+                    <span class='stat-value'>{config_changes}</span>
+                    <span class='stat-label'>Config Changes</span>
                 </div>
                 <div class='stat-item'>
-                    <span class='stat-value'>23</span>
-                    <span class='stat-label'>Active Users</span>
+                    <span class='stat-value'>{errors}</span>
+                    <span class='stat-label'>Errors</span>
                 </div>
                 <div class='stat-item'>
-                    <span class='stat-value'>5</span>
-                    <span class='stat-label'>Active Channels</span>
+                    <span class='stat-value'>{len(logs)}</span>
+                    <span class='stat-label'>Total Logs</span>
                 </div>
             </div>
         </div>
         
         <div class='card'>
-            <h2>Top Users This Month</h2>
-            <table>
-                <thead>
-                    <tr><th>User</th><th>Messages</th><th>Tokens</th></tr>
-                </thead>
-                <tbody>
-                    <tr><td>User#1234</td><td>42</td><td>1,203</td></tr>
-                    <tr><td>Member#5678</td><td>38</td><td>987</td></tr>
-                    <tr><td>Admin#9999</td><td>31</td><td>756</td></tr>
-                </tbody>
-            </table>
-        </div>
-        
-        <div class='card'>
-            <h2>Top Channels This Month</h2>
-            <table>
-                <thead>
-                    <tr><th>Channel</th><th>Messages</th><th>Tokens</th></tr>
-                </thead>
-                <tbody>
-                    <tr><td>#general</td><td>89</td><td>2,103</td></tr>
-                    <tr><td>#ai-chat</td><td>34</td><td>1,287</td></tr>
-                    <tr><td>#support</td><td>24</td><td>651</td></tr>
-                </tbody>
-            </table>
+            <h2>Recent Guild Activity</h2>
+            <div class='logs-container' style='max-height: 400px; overflow-y: auto; background: #f5f5f5; padding: 1rem; border-radius: 8px;'>
+                {logs_html}
+            </div>
         </div>
         
         <div class='card'>
             <h2>Actions</h2>
             <button onclick="location.href='/guild/{gid}'" class="btn-secondary">← Back to Guild</button>
-            <button onclick="location.href='/guild/{gid}/config'" class="btn-secondary">⚙️ Configuration</button>
+            <button onclick="location.href='/guild/{gid}/test'" class="btn-secondary">🧪 Test Features</button>
+            <button onclick="location.href='/dashboard'" class="btn-secondary">← Back to Dashboard</button>
+            <button onclick="location.reload()" class="btn-primary">🔄 Refresh</button>
         </div>
     </div>
     
@@ -2126,6 +2223,45 @@ async def guild_usage(request: web.Request) -> web.Response:
     .stat-item {{ text-align: center; padding: 16px; background: #f8f9fa; border-radius: 8px; }}
     .stat-value {{ display: block; font-size: 24px; font-weight: bold; color: #2563eb; }}
     .stat-label {{ font-size: 12px; color: #6b7280; text-transform: uppercase; }}
+    .log-entry {{
+        margin-bottom: 0.5rem;
+        padding: 0.5rem;
+        border-left: 4px solid #ddd;
+        background: white;
+        border-radius: 4px;
+    }}
+    .log-entry.log-info {{ border-left-color: #2196F3; }}
+    .log-entry.log-warning {{ border-left-color: #FF9800; }}
+    .log-entry.log-error {{ border-left-color: #f44336; }}
+    .log-entry.log-debug {{ border-left-color: #9E9E9E; }}
+    .log-header {{
+        display: flex;
+        gap: 1rem;
+        font-size: 0.75rem;
+        color: #666;
+        margin-bottom: 0.25rem;
+    }}
+    .log-level {{
+        font-weight: bold;
+        text-transform: uppercase;
+    }}
+    .log-message {{
+        font-size: 0.85rem;
+        line-height: 1.3;
+    }}
+    .log-extra {{
+        margin-top: 0.25rem;
+        padding: 0.25rem;
+        background: #f8f8f8;
+        border-radius: 4px;
+        font-size: 0.7rem;
+    }}
+    .no-logs, .error-logs {{
+        text-align: center;
+        color: #666;
+        font-style: italic;
+        padding: 1.5rem;
+    }}
     </style>
     """
     

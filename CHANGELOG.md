@@ -19,6 +19,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Channel-specific configuration page with per-channel listening settings
 - Prompt management interface with member-specific customization
 - Enhanced provider configuration with cloud/self-hosted categorization
+- **Variables System:** Comprehensive prompt injection system with 17+ contextual variables including time, user info, server details, and system data using `{{variable_name}}` syntax
 
 ### Changed
 - Completely refactored provider system to use configuration dictionaries instead of API keys

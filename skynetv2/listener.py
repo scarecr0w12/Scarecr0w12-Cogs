@@ -3,6 +3,7 @@ from __future__ import annotations
 import time
 import discord
 from .api.base import ChatMessage
+from .logging_system import log_ai_request, log_listening_event, log_rate_limit_hit, log_error_event
 
 class ListenerMixin:
     """Passive on_message logic extracted from main cog."""
@@ -73,6 +74,9 @@ class ListenerMixin:
             triggered = True
             print(f"[SkynetV2 Listener] Mode is 'all', triggered=True")
         
+        # Log the listening event
+        await log_listening_event(guild, message.channel, mode, triggered, message.author)
+        
         print(f"[SkynetV2 Listener] Final triggered status: {triggered}")
         if not triggered:
             print(f"[SkynetV2 Listener] Not triggered, returning")
@@ -81,6 +85,7 @@ class ListenerMixin:
         err = await self._check_and_record_usage(guild, message.channel, message.author)
         if err:
             print(f"[SkynetV2 Listener] Usage limit exceeded: {err}")
+            await log_rate_limit_hit(guild, message.author, message.channel, str(err))
             return
         
         print(f"[SkynetV2 Listener] Resolving provider and model...")
@@ -103,6 +108,11 @@ class ListenerMixin:
                 chunks.append(chunk)
             text = "".join(chunks) or "(no output)"
             last_usage = getattr(provider, "get_last_usage", lambda: None)()
+            
+            # Log the AI request with usage info
+            model_name = model["name"] if isinstance(model, dict) else str(model)
+            tokens_used = last_usage.get('total_tokens', 0) if last_usage else 0
+            await log_ai_request(guild, message.author, message.channel, provider_name, model_name, tokens_used)
             if last_usage:
                 async with self.config.guild(guild).usage as usage:
                     t = usage.setdefault("tokens", {"prompt": 0, "completion": 0, "total": 0})
@@ -124,4 +134,5 @@ class ListenerMixin:
             import traceback
             print(f"[SkynetV2 Listener] Error processing message: {e}")
             print(traceback.format_exc())
+            await log_error_event(guild, message.author, message.channel, f"AI processing error: {str(e)}")
             return

@@ -27,6 +27,7 @@ AI assistant cog focused on usability, governance, and extensibility.
 
 - **Multi-Provider AI System**: Support for OpenAI, Anthropic Claude, Groq, Google Gemini, and self-hosted solutions (Ollama, LM Studio, LocalAI, vLLM, Text Generation WebUI)
 - **Chat (prefix + slash)** with streaming support and provider selection
+- **Variables System**: Dynamic prompt injection with 17+ contextual variables (`{{user_name}}`, `{{server_name}}`, `{{time}}`, etc.)
 - **Per-Channel Configuration**: Channel-specific listening modes, keywords, and AI behavior overrides
 - **Multi-Level Prompting**: Hierarchical prompt system (System → Guild → Member) for personalized AI interactions
 - **Advanced Memory System**: Per-channel memory with context building, pruning policies, and conversation history

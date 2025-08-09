@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import time
 import discord
+from redbot.core import commands  # Import commands for the listener decorator
 from .api.base import ChatMessage
 from .logging_system import log_ai_request, log_listening_event, log_rate_limit_hit, log_error_event
 from .message_utils import MessageChunker, ConversationManager
@@ -19,7 +20,7 @@ class ListenerMixin:
     def _passive_enabled(self):  # helper if future conditional import
         return True
 
-    @discord.utils.copy_doc
+    @commands.Cog.listener()
     async def on_message(self, message: discord.Message):  # type: ignore[override]
         if message.author.bot or not message.guild:
             return

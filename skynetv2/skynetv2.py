@@ -2130,6 +2130,27 @@ class SkynetV2(ToolsMixin, MemoryMixin, StatsMixin, ListenerMixin, Orchestration
         
         await ctx.send(embed=embed)
 
+    @ai_group.command(name="test_listener")
+    @commands.bot_has_permissions(send_messages=True)
+    async def ai_test_listener(self, ctx: commands.Context):
+        """Test if the on_message listener is being called."""
+        guild = ctx.guild
+        
+        # Check if the ListenerMixin has on_message
+        has_on_message = hasattr(self, 'on_message')
+        
+        # Check recent message to see if our debug prints would show
+        response = f"🔍 **Listener Test Results:**\n\n"
+        response += f"**Has on_message method:** {has_on_message}\n"
+        response += f"**Guild:** {guild.name} ({guild.id})\n"
+        response += f"**Bot User:** {self.bot.user.mention} (ID: {self.bot.user.id})\n\n"
+        response += f"**Next: Try mentioning the bot and check console for:**\n"
+        response += f"`🚨 [SkynetV2 Listener v1.2.3] PROCESSING MESSAGE`\n\n"
+        response += f"**If you DON'T see that log, the listener isn't running.**\n"
+        response += f"**If you DO see it, the issue is in the logic.**"
+        
+        await ctx.send(response)
+
     @ai_group.command(name="test_new_system")
     @commands.bot_has_permissions(send_messages=True)
     async def ai_test_new_system(self, ctx: commands.Context):

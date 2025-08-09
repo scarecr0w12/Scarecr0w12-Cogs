@@ -14,6 +14,7 @@ from redbot.core.utils.predicates import MessagePredicate # pyright: ignore[repo
 from .config import register_config
 from .api.base import ChatMessage
 from .api.openai import OpenAIProvider
+from .markdown_utils import ResponseFormatter, DiscordMarkdownFormatter, MarkdownParser
 from .memory import MemoryMixin
 from .tools import ToolsMixin
 from .stats import StatsMixin
@@ -142,6 +143,20 @@ class SkynetV2(ToolsMixin, MemoryMixin, StatsMixin, ListenerMixin, Orchestration
         
         raise RuntimeError(f"Unsupported provider: {provider_name}")
 
+    async def _get_provider(self, provider_name: str):
+        """Get a provider instance by name."""
+        try:
+            # Get global provider config
+            global_providers = await self.config.providers()
+            provider_config = global_providers.get(provider_name.lower())
+            
+            if not provider_config:
+                return None
+                
+            return self.build_provider(provider_name.lower(), provider_config)
+        except Exception:
+            return None
+
     async def _estimate_and_record_cost(self, guild: discord.Guild, provider: str, model_name: str, prompt_tokens: int, completion_tokens: int):
         pricing = await self.config.pricing()
         prov_map = pricing.get(provider, {})
@@ -234,7 +249,12 @@ class SkynetV2(ToolsMixin, MemoryMixin, StatsMixin, ListenerMixin, Orchestration
             return
         provider_name, model, provider_config = await self.resolve_provider_and_model(ctx.guild)
         if not provider_config:
-            await ctx.send("Provider not configured. Use `[p]ai provider key set <provider> <key>`.")
+            error_msg = ResponseFormatter.format_error(
+                "Provider Not Configured",
+                "An AI provider needs to be set up before using chat commands.",
+                f"Use `{ctx.prefix}ai provider key set <provider> <key>` to configure a provider."
+            )
+            await ctx.send(error_msg)
             return
         try:
             provider = self.build_provider(provider_name, provider_config)
@@ -292,7 +312,12 @@ class SkynetV2(ToolsMixin, MemoryMixin, StatsMixin, ListenerMixin, Orchestration
             return
         provider_name, model, provider_config = await self.resolve_provider_and_model(ctx.guild)
         if not provider_config:
-            await ctx.send("Provider not configured. Use `[p]ai provider key set <provider> <key>`.")
+            error_msg = ResponseFormatter.format_error(
+                "Provider Not Configured", 
+                "An AI provider needs to be set up before using chat commands.",
+                f"Use `{ctx.prefix}ai provider key set <provider> <key>` to configure a provider."
+            )
+            await ctx.send(error_msg)
             return
         model_name = model["name"] if isinstance(model, dict) else str(model)
         policy_err = await self._is_model_allowed(ctx.guild, provider_name, model_name)
@@ -381,23 +406,139 @@ class SkynetV2(ToolsMixin, MemoryMixin, StatsMixin, ListenerMixin, Orchestration
 
     @ai_group.command(name="variables")
     async def ai_variables(self, ctx: commands.Context):
-        """Show available variables for prompt injection."""
+        """Show available variables for prompt injection with enhanced formatting."""
         help_text = self.get_available_variables_help(ctx.guild, ctx.author)
-        # Split into chunks to handle Discord's 2000 character limit
+        
+        # Use enhanced markdown-aware truncation
         if len(help_text) > 1900:
-            parts = help_text.split('\n\n')
-            current_chunk = ""
-            for part in parts:
-                if len(current_chunk + part) > 1900:
-                    if current_chunk:
-                        await ctx.send(current_chunk)
-                    current_chunk = part + '\n\n'
-                else:
-                    current_chunk += part + '\n\n'
-            if current_chunk:
-                await ctx.send(current_chunk)
+            truncated = ResponseFormatter.truncate_with_markdown(help_text, 1900)
+            await ctx.send(truncated)
         else:
             await ctx.send(help_text)
+
+    @ai_group.command(name="modelinfo", aliases=["model-info"])
+    async def ai_model_info(self, ctx: commands.Context, model_name: Optional[str] = None):
+        """Show information about model capabilities and supported parameters."""
+        try:
+            if model_name:
+                # Show info for specified model - need to determine provider
+                provider_name, current_model_dict, provider_config = await self.resolve_provider_and_model(ctx.guild)
+                
+                from .model_capabilities import get_parameter_help
+                help_text = get_parameter_help(model_name, provider_name)
+                await ctx.send(help_text)
+            else:
+                # Show info for current model
+                provider_name, model_dict, provider_config = await self.resolve_provider_and_model(ctx.guild)
+                
+                # Extract actual model name
+                if isinstance(model_dict, dict):
+                    current_model = model_dict.get("name", "unknown")
+                else:
+                    current_model = str(model_dict)
+                
+                from .model_capabilities import get_parameter_help
+                help_text = get_parameter_help(current_model, provider_name)
+                
+                title = f"**Current Model:** {current_model} ({provider_name})\n\n"
+                full_text = title + help_text
+                
+                await ctx.send(full_text)
+        except Exception as e:
+            await ctx.send(f"❌ Error getting model information: {e}")
+
+    @ai_group.command(name="refresh-models")
+    @checks.admin_or_permissions(manage_guild=True)
+    async def ai_refresh_models(self, ctx: commands.Context, provider: Optional[str] = None):
+        """Refresh available models from AI providers."""
+        try:
+            if provider:
+                # Refresh specific provider
+                await self._refresh_provider_models(provider)
+                await ctx.send(f"✅ Refreshed models for {provider}")
+            else:
+                # Refresh all configured providers
+                providers = await self.config.providers()
+                refreshed = []
+                for provider_name in providers:
+                    if provider_name in ["default", "serp", "firecrawl"]:
+                        continue  # Skip non-AI providers
+                    try:
+                        await self._refresh_provider_models(provider_name)
+                        refreshed.append(provider_name)
+                    except Exception as e:
+                        await ctx.send(f"⚠️ Failed to refresh {provider_name}: {e}")
+                
+                if refreshed:
+                    await ctx.send(f"✅ Refreshed models for: {', '.join(refreshed)}")
+                else:
+                    await ctx.send("❌ No providers were successfully refreshed")
+        except Exception as e:
+            await ctx.send(f"❌ Error refreshing models: {e}")
+
+    @ai_group.command(name="list-models")
+    async def ai_list_models(self, ctx: commands.Context, provider: Optional[str] = None):
+        """List available models from AI providers."""
+        try:
+            if provider:
+                # List models for specific provider
+                available_models = await self.config.available_models()
+                models = available_models.get(provider, [])
+                if models:
+                    models_text = "\n".join(f"• {model}" for model in models[:20])  # Limit to 20
+                    if len(models) > 20:
+                        models_text += f"\n... and {len(models) - 20} more"
+                    await ctx.send(f"**{provider.title()} Models:**\n{models_text}")
+                else:
+                    await ctx.send(f"❌ No models found for {provider}. Try refreshing first: `{ctx.clean_prefix}ai refresh-models {provider}`")
+            else:
+                # List models for all providers
+                available_models = await self.config.available_models()
+                if not available_models:
+                    await ctx.send("❌ No models cached. Try refreshing first: `{ctx.clean_prefix}ai refresh-models`")
+                    return
+                
+                lines = []
+                for provider_name, models in available_models.items():
+                    if models:
+                        count = len(models)
+                        sample = models[:3]  # Show first 3 models
+                        sample_text = ", ".join(sample)
+                        if count > 3:
+                            sample_text += f", ... ({count - 3} more)"
+                        lines.append(f"**{provider_name.title()}:** {sample_text}")
+                
+                if lines:
+                    models_text = "\n".join(lines)
+                    await ctx.send(f"**Available Models:**\n{models_text}\n\n💡 Use `{ctx.clean_prefix}ai list-models <provider>` for full list")
+                else:
+                    await ctx.send("❌ No models found. Try refreshing first: `{ctx.clean_prefix}ai refresh-models`")
+        except Exception as e:
+            await ctx.send(f"❌ Error listing models: {e}")
+
+    async def _refresh_provider_models(self, provider_name: str) -> None:
+        """Refresh models for a specific provider."""
+        try:
+            # Get provider instance
+            provider_obj = await self._get_provider(provider_name)
+            if provider_obj is None:
+                raise ValueError(f"Provider {provider_name} not configured or unavailable")
+            
+            # Get available models
+            models = await provider_obj.list_models()
+            
+            # Store in config
+            available_models = await self.config.available_models()
+            available_models[provider_name] = models
+            await self.config.available_models.set(available_models)
+            
+            # Update timestamp
+            models_last_updated = await self.config.models_last_updated()
+            models_last_updated[provider_name] = int(time.time())
+            await self.config.models_last_updated.set(models_last_updated)
+            
+        except Exception as e:
+            raise Exception(f"Failed to refresh models for {provider_name}: {e}")
 
     @ai_group.group(name="rate")
     @checks.admin_or_permissions(manage_guild=True)
@@ -767,6 +908,110 @@ class SkynetV2(ToolsMixin, MemoryMixin, StatsMixin, ListenerMixin, Orchestration
                 await interaction.followup.send(current_chunk, ephemeral=True)
         else:
             await interaction.response.send_message(help_text, ephemeral=True)
+
+    @ai_slash.command(name="modelinfo", description="Show model capabilities and parameter constraints")
+    @app_commands.describe(model_name="Specific model to check (optional, defaults to current model)")
+    async def slash_model_info(self, interaction: discord.Interaction, model_name: Optional[str] = None):
+        """Show information about model capabilities and supported parameters."""
+        try:
+            if model_name:
+                # Show info for specified model - need to determine provider
+                provider_name, current_model_dict, provider_config = await self.resolve_provider_and_model(interaction.guild)
+                
+                from .model_capabilities import get_parameter_help
+                help_text = get_parameter_help(model_name, provider_name)
+                await interaction.response.send_message(help_text, ephemeral=True)
+            else:
+                # Show info for current model
+                provider_name, model_dict, provider_config = await self.resolve_provider_and_model(interaction.guild)
+                
+                # Extract actual model name
+                if isinstance(model_dict, dict):
+                    current_model = model_dict.get("name", "unknown")
+                else:
+                    current_model = str(model_dict)
+                
+                from .model_capabilities import get_parameter_help
+                help_text = get_parameter_help(current_model, provider_name)
+                
+                title = f"**Current Model:** {current_model} ({provider_name})\n\n"
+                full_text = title + help_text
+                
+                await interaction.response.send_message(full_text, ephemeral=True)
+        except Exception as e:
+            await interaction.response.send_message(f"❌ Error getting model information: {e}", ephemeral=True)
+
+    @provider_group.command(name="refresh-models", description="Refresh available models from AI providers")
+    @app_commands.describe(provider="Specific provider to refresh (leave empty for all)")
+    @app_commands.checks.has_permissions(manage_guild=True)
+    async def slash_refresh_models(self, interaction: discord.Interaction, provider: Optional[str] = None):
+        """Refresh available models from AI providers."""
+        await interaction.response.defer(ephemeral=True)
+        try:
+            if provider:
+                # Refresh specific provider
+                await self._refresh_provider_models(provider)
+                await interaction.followup.send(f"✅ Refreshed models for {provider}")
+            else:
+                # Refresh all configured providers
+                providers = await self.config.providers()
+                refreshed = []
+                for provider_name in providers:
+                    if provider_name in ["default", "serp", "firecrawl"]:
+                        continue  # Skip non-AI providers
+                    try:
+                        await self._refresh_provider_models(provider_name)
+                        refreshed.append(provider_name)
+                    except Exception as e:
+                        await interaction.followup.send(f"⚠️ Failed to refresh {provider_name}: {e}")
+                
+                if refreshed:
+                    await interaction.followup.send(f"✅ Refreshed models for: {', '.join(refreshed)}")
+                else:
+                    await interaction.followup.send("❌ No providers were successfully refreshed")
+        except Exception as e:
+            await interaction.followup.send(f"❌ Error refreshing models: {e}")
+
+    @provider_group.command(name="list-models", description="List available models from AI providers")
+    @app_commands.describe(provider="Specific provider to list models for")
+    async def slash_list_models(self, interaction: discord.Interaction, provider: Optional[str] = None):
+        """List available models from AI providers."""
+        try:
+            if provider:
+                # List models for specific provider
+                available_models = await self.config.available_models()
+                models = available_models.get(provider, [])
+                if models:
+                    models_text = "\n".join(f"• {model}" for model in models[:20])  # Limit to 20
+                    if len(models) > 20:
+                        models_text += f"\n... and {len(models) - 20} more"
+                    await interaction.response.send_message(f"**{provider.title()} Models:**\n{models_text}", ephemeral=True)
+                else:
+                    await interaction.response.send_message(f"❌ No models found for {provider}. Try refreshing first with `/skynet provider refresh-models {provider}`", ephemeral=True)
+            else:
+                # List models for all providers
+                available_models = await self.config.available_models()
+                if not available_models:
+                    await interaction.response.send_message("❌ No models cached. Try refreshing first with `/skynet provider refresh-models`", ephemeral=True)
+                    return
+                
+                lines = []
+                for provider_name, models in available_models.items():
+                    if models:
+                        count = len(models)
+                        sample = models[:3]  # Show first 3 models
+                        sample_text = ", ".join(sample)
+                        if count > 3:
+                            sample_text += f", ... ({count - 3} more)"
+                        lines.append(f"**{provider_name.title()}:** {sample_text}")
+                
+                if lines:
+                    models_text = "\n".join(lines)
+                    await interaction.response.send_message(f"**Available Models:**\n{models_text}\n\n💡 Use `/skynet provider list-models <provider>` for full list", ephemeral=True)
+                else:
+                    await interaction.response.send_message("❌ No models found. Try refreshing first with `/skynet provider refresh-models`", ephemeral=True)
+        except Exception as e:
+            await interaction.response.send_message(f"❌ Error listing models: {e}", ephemeral=True)
 
     # Memory management slash commands
 

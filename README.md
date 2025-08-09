@@ -26,10 +26,11 @@ AI assistant cog focused on usability, governance, and extensibility.
 **Features:**
 
 - **Multi-Provider AI System**: Support for OpenAI, Anthropic Claude, Groq, Google Gemini, and self-hosted solutions (Ollama, LM Studio, LocalAI, vLLM, Text Generation WebUI)
+- **Rich Discord Markdown Integration**: Enhanced system prompts, consistent message formatting, and intelligent markdown processing throughout all interactions
 - **Chat (prefix + slash)** with streaming support and provider selection
 - **Variables System**: Dynamic prompt injection with 17+ contextual variables (`{{user_name}}`, `{{server_name}}`, `{{time}}`, etc.)
 - **Per-Channel Configuration**: Channel-specific listening modes, keywords, and AI behavior overrides
-- **Multi-Level Prompting**: Hierarchical prompt system (System → Guild → Member) for personalized AI interactions
+- **Multi-Level Prompting**: Hierarchical prompt system (System → Guild → Member) for personalized AI interactions with rich markdown formatting
 - **Advanced Memory System**: Per-channel memory with context building, pruning policies, and conversation history
 - **Comprehensive Web Interface**: OAuth2-authenticated management portal with interactive forms and real-time configuration
 - **Tool Registry**: Extensible tool system with ping, websearch, and Firecrawl integration

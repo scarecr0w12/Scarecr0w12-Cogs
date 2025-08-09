@@ -4,6 +4,16 @@ Implemented commands (prefix + slash mirrors where noted).
 
 **Note**: Slash commands use `/skynet` instead of `/ai` to avoid conflicts.
 
+## Markdown Enhancements
+
+SkynetV2 now includes comprehensive Discord markdown formatting throughout all responses:
+
+- **Rich System Prompts**: Enhanced with structured markdown formatting and Discord-specific guidelines
+- **Consistent Message Formatting**: Error, success, and info messages with visual hierarchy
+- **Discord-Aware Formatting**: Proper use of `**bold**`, `*italic*`, `code`, code blocks, quotes, links, and mentions
+- **Intelligent Truncation**: Markdown-aware text processing that preserves formatting structure
+- **Variable Documentation**: Enhanced `[p]ai variables` command with rich markdown formatting and examples
+
 ## Chat
 
 - /skynet chat message:string stream?:bool

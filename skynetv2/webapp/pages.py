@@ -1515,15 +1515,29 @@ async def handle_guild_prompt(request: web.Request):
             return web.json_response({'success': False, 'error': 'Guild not found'})
         
         # Check permissions
-        is_admin = str(gid) in user.get('permissions', {}).get('guild_admin', []) or user.get('permissions', {}).get('bot_owner')
+        permissions = user.get('permissions') or {}
+        is_admin = str(gid) in permissions.get('guild_admin', []) or permissions.get('bot_owner')
         if not is_admin:
             return web.json_response({'success': False, 'error': 'Admin access required'})
         
-        data = await request.json()
+        # Handle both JSON and form data
+        content_type = request.headers.get('content-type', '')
+        if 'application/json' in content_type:
+            data = await request.json()
+            prompt_text = data.get('prompt', '')
+        else:
+            # Form data
+            data = await request.post()
+            prompt_text = data.get('prompt')
+            if hasattr(prompt_text, 'strip'):
+                prompt_text = prompt_text.strip()
+            else:
+                prompt_text = str(prompt_text or '').strip()
+        
         config = webiface.cog.config.guild(guild)
         
         async with config.system_prompts() as prompts:
-            prompts['guild'] = data.get('prompt', '')
+            prompts['guild'] = prompt_text
         
         return web.json_response({'success': True})
     except Exception as e:
@@ -1543,16 +1557,29 @@ async def handle_member_prompt(request: web.Request):
             return web.json_response({'success': False, 'error': 'Guild not found'})
         
         # Check permissions
-        is_admin = str(gid) in user.get('permissions', {}).get('guild_admin', []) or user.get('permissions', {}).get('bot_owner')
+        permissions = user.get('permissions') or {}
+        is_admin = str(gid) in permissions.get('guild_admin', []) or permissions.get('bot_owner')
         if not is_admin:
             return web.json_response({'success': False, 'error': 'Admin access required'})
         
-        data = await request.json()
+        # Handle both JSON and form data
+        content_type = request.headers.get('content-type', '')
+        if 'application/json' in content_type:
+            data = await request.json()
+            prompt_text = data.get('prompt', '').strip()
+        else:
+            # Form data
+            data = await request.post()
+            prompt_text = data.get('prompt')
+            if hasattr(prompt_text, 'strip'):
+                prompt_text = prompt_text.strip()
+            else:
+                prompt_text = str(prompt_text or '').strip()
+        
         config = webiface.cog.config.guild(guild)
         
         async with config.system_prompts() as prompts:
             members = prompts.setdefault('members', {})
-            prompt_text = data.get('prompt', '').strip()
             if prompt_text:
                 members[member_id] = prompt_text
             elif member_id in members:

@@ -4,6 +4,7 @@ from typing import List, Dict, Any
 import time
 import discord # pyright: ignore[reportMissingImports]
 from .api.base import ChatMessage
+from .markdown_utils import MarkdownTemplateProcessor, DiscordMarkdownFormatter
 
 class MemoryMixin:
     """Memory helper methods for SkynetV2.
@@ -23,24 +24,38 @@ class MemoryMixin:
         return list(per.get("messages", []))
 
     async def _build_system_prompt(self, guild: discord.Guild, user: discord.Member = None) -> str:
-        """Build hierarchical system prompt: System > Guild > Member"""
+        """Build hierarchical system prompt with markdown formatting: System > Guild > Member"""
         global_config = await self.config.system_prompts()
         guild_config = await self.config.guild(guild).system_prompts()
         
-        # Start with global system prompt
-        system_prompt = global_config.get('system', 'You are a helpful AI assistant.')
+        # Start with global system prompt (already markdown formatted)
+        system_prompt = global_config.get('default', 'You are a helpful AI assistant.')
         
-        # Add guild-level prompt if configured
+        # Add guild-level context with markdown formatting
         guild_prompt = guild_config.get('guild', '')
         if guild_prompt:
-            system_prompt += f"\n\nGuild Context: {guild_prompt}"
+            fmt = DiscordMarkdownFormatter()
+            system_prompt += f"\n\n## Guild-Specific Context\n{guild_prompt}"
         
-        # Add member-level prompt if user provided and configured
+        # Add member-level context with markdown formatting  
         if user:
             member_prompts = guild_config.get('members', {})
             member_prompt = member_prompts.get(str(user.id), '')
             if member_prompt:
-                system_prompt += f"\n\nUser Context: {member_prompt}"
+                fmt = DiscordMarkdownFormatter()
+                system_prompt += f"\n\n## User-Specific Context\n"
+                system_prompt += f"**User:** {fmt.mention_user(user.id)} ({user.display_name})\n"
+                system_prompt += f"**Instructions:** {member_prompt}"
+        
+        # Add current Discord context for better responses
+        context_info = []
+        context_info.append(f"**Server:** {guild.name}")
+        context_info.append(f"**Member Count:** {guild.member_count}")
+        if hasattr(guild, 'premium_tier') and guild.premium_tier > 0:
+            context_info.append(f"**Boost Level:** {guild.premium_tier}")
+        
+        if context_info:
+            system_prompt += f"\n\n## Current Discord Context\n" + "\n".join(context_info)
         
         return system_prompt.strip()
 

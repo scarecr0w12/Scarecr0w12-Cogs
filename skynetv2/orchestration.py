@@ -463,11 +463,11 @@ class VariableResolver:
         return [var for var in self.get_available_variables(guild, user) if var.category == category]
     
     def get_variables_help_text(self, guild=None, user=None) -> str:
-        """Generate help text for available variables."""
+        """Generate help text for available variables with enhanced markdown formatting."""
         variables = self.get_available_variables(guild, user)
         
         if not variables:
-            return "No variables available in this context."
+            return "ℹ️ **No Variables Available**\nNo variables are available in this context."
         
         # Group by category
         categories = {}
@@ -476,16 +476,19 @@ class VariableResolver:
                 categories[var.category] = []
             categories[var.category].append(var)
         
-        help_text = "**Available Variables:**\n"
-        help_text += "Use `{{variable_name}}` in prompts to inject contextual data.\n\n"
+        help_text = "# 📝 Available Variables\n"
+        help_text += "Use `{{variable_name}}` syntax in prompts to inject contextual data.\n\n"
         
         for category, vars_list in categories.items():
-            help_text += f"**{category.title()} Variables:**\n"
+            help_text += f"## {category.title()} Variables\n"
             for var in vars_list:
                 help_text += f"• `{{{{{var.name}}}}}` - {var.description}\n"
             help_text += "\n"
         
-        help_text += "**Example:** `Hello {{user_display_name}}, the time is {{time}} on {{date}}.`"
+        help_text += "## Example Usage\n"
+        help_text += "```\nHello {{user_display_name}}, welcome to {{server_name}}!\nToday is {{weekday}}, {{date}} at {{time}}.\n```\n\n"
+        help_text += "💡 **Tip:** Variables are resolved when your prompt is sent to the AI."
+        
         return help_text
 
 

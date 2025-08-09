@@ -35,6 +35,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Web interface session management and permission checking
 - Configuration persistence for complex provider setups
 
+## [1.5.0] - 2025-08-08
+
+### Added
+- **Discord Markdown Enhancement System**: Comprehensive markdown utilities with Discord-specific formatting support
+- **DiscordMarkdownFormatter**: Complete Discord markdown syntax support (bold, italic, code, quotes, mentions, timestamps, hyperlinks)
+- **Enhanced System Prompts**: Rich markdown-structured system prompts with Discord formatting guidelines and response rules
+- **ResponseFormatter**: Consistent error/success/info message formatting with visual hierarchy and structured presentation
+- **MarkdownTemplateProcessor**: Advanced template processing for structured prompt creation with context injection
+- **MarkdownParser**: Intelligent markdown element extraction and analysis for better text processing
+- **Enhanced Variable System**: Rich markdown documentation for the `[p]ai variables` command with examples and formatting guidelines
+- **Markdown-Aware Text Processing**: Intelligent truncation that preserves markdown structure and formatting integrity
+
+### Changed
+- **System Prompts**: All default system prompts enhanced with structured markdown formatting and Discord-specific guidelines
+- **Memory System**: Enhanced `_build_system_prompt()` with markdown-formatted context building and Discord information
+- **Command Responses**: Improved error messages and command outputs using consistent ResponseFormatter throughout codebase
+- **Documentation**: Updated README and commands documentation to highlight new markdown capabilities
+
+### Fixed
+- **Response Consistency**: Standardized message formatting across all commands and error scenarios
+- **Discord Integration**: Proper markdown syntax usage for better Discord message presentation
+
 ## [1.4.0] - 2025-08-08
 
 ### Added

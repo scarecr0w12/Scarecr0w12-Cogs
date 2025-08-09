@@ -22,7 +22,14 @@ class ListenerMixin:
             return
         guild = message.guild
         
-        print(f"[SkynetV2 Listener] Processing message from {message.author} in #{message.channel.name}")
+        print(f"[SkynetV2 Listener] Processing message from {message.author} in #{message.channel.name} - Guild: {guild.name}")
+        
+        # Check if the cog is enabled for this guild
+        cog_enabled = await self.config.guild(guild).enabled()
+        print(f"[SkynetV2 Listener] Cog enabled for guild: {cog_enabled}")
+        if not cog_enabled:
+            print(f"[SkynetV2 Listener] SkynetV2 cog disabled for guild {guild.name}")
+            return
         
         # Check per-channel listening configuration first
         channel_listening_config = await self.config.guild(guild).channel_listening()
@@ -43,7 +50,7 @@ class ListenerMixin:
             listening = await self.config.guild(guild).listening()
             print(f"[SkynetV2 Listener] Using global listening config: {listening}")
             if not listening or not listening.get("enabled", False):
-                print(f"[SkynetV2 Listener] Global listening disabled or not configured")
+                print(f"[SkynetV2 Listener] Global listening disabled or not configured - enabled: {listening.get('enabled', 'NOT SET') if listening else 'NO CONFIG'}")
                 return
         
         mode = listening.get("mode", "mention")

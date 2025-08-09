@@ -228,6 +228,20 @@ class SkynetV2(ToolsMixin, MemoryMixin, StatsMixin, ListenerMixin, Orchestration
         async with self.config.guild(guild).governance() as gov:
             mutate(gov)
 
+    async def _user_is_allowed(self, guild: discord.Guild, user: discord.Member, permission: str) -> bool:
+        """Check if user has a specific permission for special operations."""
+        # Bot owner always allowed
+        if await self.bot.is_owner(user):
+            return True
+        
+        # Special permissions based on type
+        if permission == "orchestrate_debug":
+            # Debug permissions require manage_guild permission
+            return user.guild_permissions.manage_guild
+        
+        # Default to no permission for unknown permission types
+        return False
+
     # ----------------
     # Prefix commands
     # ----------------
@@ -1968,6 +1982,151 @@ class SkynetV2(ToolsMixin, MemoryMixin, StatsMixin, ListenerMixin, Orchestration
                   "• `all`: Respond to all messages",
             inline=False
         )
+        
+        # Add provider status
+        try:
+            provider_name, model, provider_config = await self.resolve_provider_and_model(guild)
+            if provider_config:
+                embed.add_field(
+                    name="🤖 AI Provider Status",
+                    value=f"**Provider:** {provider_name}\n**Model:** {model.get('name') if isinstance(model, dict) else model}\n**Status:** ✅ Ready",
+                    inline=False
+                )
+            else:
+                embed.add_field(
+                    name="🤖 AI Provider Status", 
+                    value="**Status:** ❌ No provider configured\nRun `[p]ai provider key set <provider> <key>` to configure.",
+                    inline=False
+                )
+        except Exception as e:
+            embed.add_field(
+                name="🤖 AI Provider Status",
+                value=f"**Status:** ❌ Error: {str(e)}\nCheck your provider configuration.",
+                inline=False
+            )
+        
+        # Add quick troubleshooting
+        embed.add_field(
+            name="🔧 Quick Actions",
+            value=f"• Test listening: `{ctx.prefix}ai channel test`\n"
+                  f"• Enable: `{ctx.prefix}ai channel listening enable`\n"
+                  f"• Set to 'all': `{ctx.prefix}ai channel mode set all`\n"
+                  f"• Check providers: `{ctx.prefix}ai model list`",
+            inline=False
+        )
+
+        await ctx.send(embed=embed)
+
+    @ai_channel.command(name="test")
+    async def ai_channel_test(self, ctx: commands.Context, *, test_message: str = "Hello, can you hear me?"):
+        """Test if the listening system would respond to a message in this channel."""
+        if ctx.guild is None:
+            await ctx.send(ResponseFormatter.format_error(
+                "Guild Not Found", 
+                "This command must be used within a server.",
+                "Please run this command from a channel in the server you want to test."
+            ))
+            return
+        
+        channel = ctx.channel
+        guild = ctx.guild
+        
+        # Test the should_respond_to_message logic
+        channel_id = str(channel.id)
+        channel_listening = await self.config.guild(guild).channel_listening()
+        channel_config = channel_listening.get(channel_id, {})
+        
+        # Get global config as fallback
+        global_listening = await self.config.guild(guild).listening()
+        
+        # Determine if listening is enabled
+        enabled = channel_config.get('enabled')
+        if enabled is None:
+            enabled = global_listening.get('enabled', False)
+            config_source = "global default"
+        else:
+            config_source = "channel override"
+        
+        if not enabled:
+            embed = discord.Embed(
+                title="🔇 Test Result: Would NOT Respond",
+                description=f"Listening is disabled ({config_source})",
+                color=0xFF0000
+            )
+            embed.add_field(name="Test Message", value=f"`{test_message}`", inline=False)
+            embed.add_field(name="Solution", value=f"Run `{ctx.prefix}ai channel listening enable` to enable listening", inline=False)
+            await ctx.send(embed=embed)
+            return
+        
+        # Check mode and determine if it would trigger
+        mode = channel_config.get('mode') or global_listening.get('mode', 'mention')
+        keywords = channel_config.get('keywords') or global_listening.get('keywords', [])
+        
+        would_trigger = False
+        trigger_reason = ""
+        
+        if mode == 'all':
+            would_trigger = True
+            trigger_reason = "Mode is set to 'all'"
+        elif mode == 'mention':
+            # Check if bot would be mentioned (simplified check)
+            bot_mentioned = f'<@{ctx.bot.user.id}>' in test_message or f'<@!{ctx.bot.user.id}>' in test_message
+            if bot_mentioned:
+                would_trigger = True
+                trigger_reason = "Bot is mentioned in message"
+            else:
+                trigger_reason = "Bot is not mentioned in message"
+        elif mode == 'keyword':
+            if keywords:
+                found_keywords = [kw for kw in keywords if kw.lower() in test_message.lower()]
+                if found_keywords:
+                    would_trigger = True
+                    trigger_reason = f"Found keywords: {', '.join(found_keywords)}"
+                else:
+                    trigger_reason = f"No keywords found (looking for: {', '.join(keywords)})"
+            else:
+                trigger_reason = "No keywords configured"
+        
+        # Check provider status
+        provider_status = "Unknown"
+        try:
+            provider_name, model, provider_config = await self.resolve_provider_and_model(guild)
+            if provider_config:
+                provider_status = f"✅ {provider_name} with {model.get('name') if isinstance(model, dict) else model}"
+            else:
+                provider_status = "❌ No provider configured"
+                would_trigger = False  # Can't respond without provider
+                trigger_reason += " (Also: No AI provider configured)"
+        except Exception as e:
+            provider_status = f"❌ Provider error: {str(e)}"
+            would_trigger = False
+            trigger_reason += f" (Also: Provider error: {str(e)})"
+        
+        # Build result embed
+        color = 0x00FF00 if would_trigger else 0xFF0000
+        title = "🎤 Test Result: Would RESPOND" if would_trigger else "🔇 Test Result: Would NOT Respond"
+        
+        embed = discord.Embed(title=title, color=color)
+        embed.add_field(name="Test Message", value=f"`{test_message}`", inline=False)
+        embed.add_field(name="Configuration", value=f"**Enabled:** {enabled} ({config_source})\n**Mode:** {mode}", inline=False)
+        embed.add_field(name="Trigger Logic", value=trigger_reason, inline=False)
+        embed.add_field(name="AI Provider", value=provider_status, inline=False)
+        
+        if not would_trigger:
+            solutions = []
+            if not enabled:
+                solutions.append(f"• Enable listening: `{ctx.prefix}ai channel listening enable`")
+            if mode == 'mention' and 'not mentioned' in trigger_reason:
+                solutions.append(f"• Switch to 'all' mode: `{ctx.prefix}ai channel mode set all`")
+                solutions.append(f"• Or mention the bot: `@{ctx.bot.user.name} {test_message}`")
+            if mode == 'keyword' and 'No keywords found' in trigger_reason:
+                solutions.append(f"• Add keywords: `{ctx.prefix}ai channel keywords add <keyword>`")
+                solutions.append(f"• Or switch to 'all' mode: `{ctx.prefix}ai channel mode set all`")
+            if 'No provider' in provider_status:
+                solutions.append(f"• Configure AI: `{ctx.prefix}ai provider key set openai <your-key>`")
+            
+            if solutions:
+                embed.add_field(name="💡 Suggested Solutions", value="\n".join(solutions), inline=False)
         
         await ctx.send(embed=embed)
 

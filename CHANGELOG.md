@@ -56,6 +56,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Fixed
 - **Response Consistency**: Standardized message formatting across all commands and error scenarios
 - **Discord Integration**: Proper markdown syntax usage for better Discord message presentation
+- **Passive Listening Configuration**: Fixed "guild not found" errors when enabling passive listening through web interface or Discord commands
+- **Error Handling**: Improved guild validation and error messages throughout listening configuration system
 
 ## [1.4.0] - 2025-08-08
 

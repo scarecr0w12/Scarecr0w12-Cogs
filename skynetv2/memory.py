@@ -23,7 +23,7 @@ class MemoryMixin:
         per = mem.get("per_channel", {}).get(str(channel_id), {})
         return list(per.get("messages", []))
 
-    async def _build_system_prompt(self, guild: discord.Guild, user: discord.Member = None) -> str:
+    async def _build_system_prompt(self, guild: discord.Guild, user: discord.Member = None, channel: discord.TextChannel = None) -> str:
         """Build hierarchical system prompt with markdown formatting: System > Guild > Member"""
         global_config = await self.config.system_prompts()
         guild_config = await self.config.guild(guild).system_prompts()
@@ -57,14 +57,25 @@ class MemoryMixin:
         if context_info:
             system_prompt += f"\n\n## Current Discord Context\n" + "\n".join(context_info)
         
+        # **CRITICAL FIX**: Resolve variables in the system prompt
+        if hasattr(self, 'resolve_prompt_variables'):
+            try:
+                system_prompt = await self.resolve_prompt_variables(system_prompt, guild, channel, user)
+            except Exception as e:
+                # Log error but continue with unresolved prompt
+                print(f"[SkynetV2] Error resolving system prompt variables: {e}")
+        
         return system_prompt.strip()
 
     async def _memory_build_context(self, guild: discord.Guild, channel_id: int, user: discord.Member = None) -> List[ChatMessage]:
         msgs = await self._memory_get_messages(guild, channel_id)
         out: List[ChatMessage] = []
         
+        # Get channel object for variable resolution
+        channel = guild.get_channel(channel_id) if hasattr(guild, 'get_channel') else None
+        
         # Add system prompt as first message
-        system_prompt = await self._build_system_prompt(guild, user)
+        system_prompt = await self._build_system_prompt(guild, user, channel)
         out.append(ChatMessage(role="system", content=system_prompt))
         
         # Add conversation history

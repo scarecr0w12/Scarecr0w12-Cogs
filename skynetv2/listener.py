@@ -4,6 +4,7 @@ import time
 import discord
 from .api.base import ChatMessage
 from .logging_system import log_ai_request, log_listening_event, log_rate_limit_hit, log_error_event
+from .message_utils import MessageChunker, ConversationManager
 
 class ListenerMixin:
     """Passive on_message logic extracted from main cog."""
@@ -110,16 +111,41 @@ class ListenerMixin:
         
         print(f"[SkynetV2 Listener] Sending message to AI provider...")
         try:
+            # Clean up content for mentions
+            processed_content = content
+            if mode == "mention" and self.bot.user:
+                processed_content = ConversationManager.extract_mention_content(message, self.bot.user)
+            
+            # Determine if we should include conversation context
+            include_context = ConversationManager.should_include_context(message, mode)
+            
+            if include_context:
+                # Use conversation memory for context-aware responses
+                print(f"[SkynetV2 Listener] Building conversation context...")
+                messages = await self._memory_build_context(guild, message.channel.id, message.author)
+                # Add current message to context
+                messages.append(ChatMessage("user", processed_content or "Hello"))
+            else:
+                # Simple single-message context for "all" mode
+                system_prompt = await self._build_system_prompt(guild, message.author, message.channel)
+                messages = [
+                    ChatMessage("system", system_prompt),
+                    ChatMessage("user", processed_content or "Hello")
+                ]
+            
+            # Send to AI provider
             chunks = []
-            async for chunk in provider.chat(model=model["name"] if isinstance(model, dict) else str(model), messages=[ChatMessage("user", content or "Hello")]):
+            async for chunk in provider.chat(model=model["name"] if isinstance(model, dict) else str(model), messages=messages):
                 chunks.append(chunk)
             text = "".join(chunks) or "(no output)"
-            last_usage = getattr(provider, "get_last_usage", lambda: None)()
             
             # Log the AI request with usage info
+            last_usage = getattr(provider, "get_last_usage", lambda: None)()
             model_name = model["name"] if isinstance(model, dict) else str(model)
             tokens_used = last_usage.get('total_tokens', 0) if last_usage else 0
             await log_ai_request(guild, message.author, message.channel, provider_name, model_name, tokens_used)
+            
+            # Update usage statistics
             if last_usage:
                 async with self.config.guild(guild).usage as usage:
                     t = usage.setdefault("tokens", {"prompt": 0, "completion": 0, "total": 0})
@@ -133,9 +159,16 @@ class ListenerMixin:
                     u["tokens_total"] = int(u.get("tokens_total", 0)) + int(last_usage.get("total", 0))
                     c["tokens_total"] = int(c.get("tokens_total", 0)) + int(last_usage.get("total", 0))
             
-            print(f"[SkynetV2 Listener] Sending response: {text[:100]}...")
-            await message.channel.send(text[:2000])
-            print(f"[SkynetV2 Listener] Response sent successfully!")
+            # Store conversation in memory (if using context)
+            if include_context:
+                print(f"[SkynetV2 Listener] Storing conversation in memory...")
+                await self._memory_remember(guild, message.channel.id, processed_content or "Hello", text)
+            
+            # Send response using smart message handling
+            print(f"[SkynetV2 Listener] Sending response with smart chunking: {len(text)} characters...")
+            sent_messages = await MessageChunker.send_long_message(message.channel, text, reference=message)
+            print(f"[SkynetV2 Listener] Response sent as {len(sent_messages)} message(s)!")
+            
         except Exception as e:
             # Log the exception for debugging instead of silently returning
             import traceback

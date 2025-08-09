@@ -52,11 +52,17 @@ async def login(request: web.Request):
 async def oauth_callback(request: web.Request):
     webiface = request.app['webiface']
     code = request.query.get('code'); state = request.query.get('state')
+    print(f"SkynetV2 Web: OAuth callback - code: {'***' if code else None}, state: {'***' if state else None}")
     if not code:
+        print("SkynetV2 Web: OAuth callback failed - missing code")
         return web.Response(text='Authorization failed: Missing code', status=400)
     session = await get_session(request)
-    if state != session.get('oauth_state'):
+    stored_state = session.get('oauth_state')
+    print(f"SkynetV2 Web: OAuth state check - provided: {'***' if state else None}, stored: {'***' if stored_state else None}")
+    if state != stored_state:
+        print("SkynetV2 Web: OAuth callback failed - state mismatch")
         return web.Response(text='Authorization failed: Invalid state', status=400)
+    print("SkynetV2 Web: OAuth callback - starting token exchange")
     try:
         async with ClientSession() as client:
             token_data = {'client_id': webiface.client_id,'client_secret': webiface.client_secret,'grant_type': 'authorization_code','code': code,'redirect_uri': f"{webiface.public_url}/callback"}
@@ -68,13 +74,18 @@ async def oauth_callback(request: web.Request):
             async with client.get('https://discord.com/api/users/@me', headers=headers) as resp:
                 if resp.status != 200: return web.Response(text='Failed to get user info', status=400)
                 user_info = await resp.json()
+            print(f"SkynetV2 Web: Got user info for {user_info.get('username', 'unknown')}")
             async with client.get('https://discord.com/api/users/@me/guilds', headers=headers) as resp:
                 if resp.status != 200: return web.Response(text='Failed to get guild info', status=400)
                 user_guilds = await resp.json()
-    except Exception:
+            print(f"SkynetV2 Web: Got {len(user_guilds)} guilds for user")
+    except Exception as e:
+        print(f"SkynetV2 Web: OAuth2 error: {e}")
         return web.Response(text='OAuth2 error occurred. Please try again later.', status=500)
     permissions = await get_user_permissions(webiface, user_info, user_guilds)
+    print(f"SkynetV2 Web: User permissions: {permissions}")
     session['user'] = {'id': user_info['id'],'username': user_info['username'],'discriminator': user_info.get('discriminator','0000'),'avatar': user_info.get('avatar'),'permissions': permissions,'guilds': [g for g in user_guilds if str(g['id']) in permissions.get('guilds', [])]}
+    print(f"SkynetV2 Web: OAuth callback successful - redirecting to dashboard")
     return web.HTTPFound('/dashboard')
 
 async def logout(request: web.Request):

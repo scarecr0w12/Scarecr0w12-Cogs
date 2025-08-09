@@ -6,13 +6,19 @@ from typing import Any, Dict
 
 async def _require_session(request: web.Request):
     session = await get_session(request); user = session.get('user')
-    if not user: return None, web.HTTPFound('/')
+    print(f"SkynetV2 Web: Session check - user present: {user is not None}")
+    if not user: 
+        print("SkynetV2 Web: Session check failed - redirecting to login")
+        return None, web.HTTPFound('/')
     return user, None
 
 async def dashboard(request: web.Request):
     webiface = request.app['webiface']
     user, resp = await _require_session(request)
-    if resp: return resp
+    print(f"SkynetV2 Web: Dashboard accessed - user: {user.get('username') if user else None}")
+    if resp: 
+        print("SkynetV2 Web: Dashboard - no session, redirecting to login")
+        return resp
     perms = user.get('permissions', {})
     rows = []
     for gid in perms.get('guilds', []):

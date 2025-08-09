@@ -327,7 +327,7 @@ async def guild_dashboard(request: web.Request):
         actions_html = f"""
         <div class='card'>
             <h2>Quick Actions</h2>
-            <button onclick="location.href='/config/{gid}'">⚙️ Full Configuration</button>
+            <button onclick="location.href='/guild/{gid}/config'">⚙️ Full Configuration</button>
             <button onclick="location.href='/guild/{gid}/channels'">📺 Channel Settings</button>
             <button onclick="location.href='/guild/{gid}/prompts'">💬 Prompt Management</button>
             <button onclick="location.href='/test/{gid}'" class="secondary">🧪 Test AI Chat</button>
@@ -911,8 +911,8 @@ async def guild_prompts(request: web.Request):
                             <div style="background: #f8f9fa; padding: 8px; border-radius: 4px; font-size: 0.9em; margin-bottom: 1rem; max-height: 100px; overflow-y: auto;">
                                 {prompt[:200]}{'...' if len(prompt) > 200 else ''}
                             </div>
-                            <button onclick="editMemberPrompt('{member_id}', '{member.display_name}')" class="btn-outline btn-sm">✏️ Edit</button>
-                            <button onclick="deleteMemberPrompt('{member_id}', '{member.display_name}')" class="btn-danger btn-sm">🗑️ Delete</button>
+                            <button data-member-id="{member_id}" data-member-name="{member.display_name}" onclick="editMemberPromptSafe(this)" class="btn-outline btn-sm">✏️ Edit</button>
+                            <button data-member-id="{member_id}" data-member-name="{member.display_name}" onclick="deleteMemberPromptSafe(this)" class="btn-danger btn-sm">🗑️ Delete</button>
                         </div>
                     </div>
                 """
@@ -1019,7 +1019,7 @@ async def guild_prompts(request: web.Request):
         }}
         
         // Add server-specific context
-        generatedPrompt += '\\n\\nYou are operating in the "{guild.name}" Discord server. Be mindful of the server\'s community and culture.';
+        generatedPrompt += '\\n\\nYou are operating in the "{guild.name}" Discord server. Be mindful of the server\\'s community and culture.';
         
         setTimeout(() => {{
             document.getElementById('generated-text').value = generatedPrompt;
@@ -1108,6 +1108,12 @@ async def guild_prompts(request: web.Request):
         document.getElementById('member-prompt-modal').style.display = 'block';
     }}
     
+    function editMemberPromptSafe(button) {{
+        const memberId = button.dataset.memberId;
+        const displayName = button.dataset.memberName;
+        editMemberPrompt(memberId, displayName);
+    }}
+    
     function deleteMemberPrompt(memberId, displayName) {{
         if (confirm(`Delete prompt for ${{displayName}}?`)) {{
             fetch(`/api/guild/{gid}/prompts/member/${{memberId}}`, {{
@@ -1121,6 +1127,12 @@ async def guild_prompts(request: web.Request):
                 else alert('Error: ' + data.error);
             }});
         }}
+    }}
+    
+    function deleteMemberPromptSafe(button) {{
+        const memberId = button.dataset.memberId;
+        const displayName = button.dataset.memberName;
+        deleteMemberPrompt(memberId, displayName);
     }}
     
     function closeModal() {{
@@ -1664,10 +1676,16 @@ button:active{transform:translateY(0)}
 .breadcrumb a{color:#3b82f6;text-decoration:none}
 .breadcrumb a:hover{text-decoration:underline}
 .breadcrumb-separator{margin:0 0.5rem}
+.stats-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:1rem;margin-bottom:1.5rem}
+.stat-item{text-align:center;padding:1.5rem;background:#f8fafc;border-radius:0.75rem;border:1px solid #e2e8f0;transition:transform 0.2s}
+.stat-item:hover{transform:translateY(-2px)}
+.stat-value{display:block;font-size:2rem;font-weight:700;color:#3b82f6;margin-bottom:0.5rem}
+.stat-label{font-size:0.75rem;color:#6b7280;text-transform:uppercase;letter-spacing:0.1em;font-weight:500}
 @media(max-width:768px){
   .container{padding:1rem}
   .form-row{flex-direction:column;align-items:stretch}
   .grid-cols-2,.grid-cols-3{grid-template-columns:1fr}
+  .stats-grid{grid-template-columns:repeat(2,1fr)}
   nav{padding:0.5rem 1rem}
   nav a{margin-right:0.75rem;padding:0.25rem 0.5rem}
 }
@@ -1853,6 +1871,355 @@ def _html_base(title: str, body: str, current_page: str = '') -> str:
 </body>
 </html>"""
 
+async def global_config(request: web.Request) -> web.Response:
+    """Global configuration page - bot owner only"""
+    webiface = request.app['webiface']
+    session = await get_session(request)
+    user = session.get('user')
+    
+    if not user or not user.get('permissions', {}).get('bot_owner'):
+        return web.HTTPFound('/login')
+    
+    body = f"""
+    <div class='container'>
+        <h1>🌍 Global Configuration</h1>
+        <div class='card'>
+            <h2>Global Settings</h2>
+            <p>Configure default settings for all servers.</p>
+            <div class='grid' style='grid-template-columns: 1fr 1fr;'>
+                <div>
+                    <h3>Default AI Model</h3>
+                    <select id='default-model' onchange='updateGlobalSetting("default_model", this.value)'>
+                        <option value='gpt-4o-mini'>GPT-4 Mini (Fast)</option>
+                        <option value='gpt-4'>GPT-4 (Smart)</option>
+                        <option value='claude-3-haiku'>Claude 3 Haiku</option>
+                    </select>
+                </div>
+                <div>
+                    <h3>Rate Limits</h3>
+                    <label>Messages per hour: <input type='number' value='100' onchange='updateGlobalSetting("rate_limit", this.value)'></label>
+                </div>
+            </div>
+        </div>
+        
+        <div class='card'>
+            <h2>Bot Statistics</h2>
+            <div class='stats-grid'>
+                <div class='stat-item'>
+                    <span class='stat-value'>{len(webiface.cog.bot.guilds)}</span>
+                    <span class='stat-label'>Total Servers</span>
+                </div>
+                <div class='stat-item'>
+                    <span class='stat-value'>{len(webiface.cog.bot.users)}</span>
+                    <span class='stat-label'>Total Users</span>
+                </div>
+            </div>
+        </div>
+        
+        <div class='card'>
+            <h2>Quick Actions</h2>
+            <button onclick="location.href='/bot-stats'" class="btn-primary">📊 Detailed Statistics</button>
+            <button onclick="location.href='/logs'" class="btn-secondary">📋 View Logs</button>
+            <button onclick="location.href='/dashboard'" class="btn-secondary">← Back to Dashboard</button>
+        </div>
+    </div>
+    
+    <script>
+    function updateGlobalSetting(key, value) {{
+        console.log(`Updating global setting: ${{key}} = ${{value}}`);
+        // TODO: Implement API call to update global settings
+    }}
+    </script>
+    """
+    
+    return web.Response(text=_html_base('Global Configuration', body), content_type='text/html')
+
+async def bot_stats(request: web.Request) -> web.Response:
+    """Bot statistics page - bot owner only"""
+    webiface = request.app['webiface']
+    session = await get_session(request)
+    user = session.get('user')
+    
+    if not user or not user.get('permissions', {}).get('bot_owner'):
+        return web.HTTPFound('/login')
+    
+    body = f"""
+    <div class='container'>
+        <h1>📊 Bot Statistics</h1>
+        <div class='card'>
+            <h2>Server Overview</h2>
+            <div class='stats-grid'>
+                <div class='stat-item'>
+                    <span class='stat-value'>{len(webiface.cog.bot.guilds)}</span>
+                    <span class='stat-label'>Total Servers</span>
+                </div>
+                <div class='stat-item'>
+                    <span class='stat-value'>{len(webiface.cog.bot.users)}</span>
+                    <span class='stat-label'>Total Users</span>
+                </div>
+                <div class='stat-item'>
+                    <span class='stat-value'>{sum(1 for g in webiface.cog.bot.guilds if g.me.guild_permissions.administrator)}</span>
+                    <span class='stat-label'>Admin Access</span>
+                </div>
+            </div>
+        </div>
+        
+        <div class='card'>
+            <h2>Top Servers by Member Count</h2>
+            <table>
+                <thead>
+                    <tr><th>Server Name</th><th>Members</th><th>Channels</th></tr>
+                </thead>
+                <tbody>
+    """
+    
+    # Get top 10 servers by member count
+    sorted_guilds = sorted(webiface.cog.bot.guilds, key=lambda g: g.member_count or 0, reverse=True)[:10]
+    for guild in sorted_guilds:
+        body += f"""
+                    <tr>
+                        <td>{guild.name}</td>
+                        <td>{guild.member_count or 'Unknown'}</td>
+                        <td>{len(guild.channels)}</td>
+                    </tr>
+        """
+    
+    body += """
+                </tbody>
+            </table>
+        </div>
+        
+        <div class='card'>
+            <h2>Actions</h2>
+            <button onclick="location.href='/global-config'" class="btn-primary">⚙️ Global Config</button>
+            <button onclick="location.href='/logs'" class="btn-secondary">📋 View Logs</button>
+            <button onclick="location.href='/dashboard'" class="btn-secondary">← Back to Dashboard</button>
+        </div>
+    </div>
+    """
+    
+    return web.Response(text=_html_base('Bot Statistics', body), content_type='text/html')
+
+async def logs_page(request: web.Request) -> web.Response:
+    """Logs page - bot owner only"""
+    webiface = request.app['webiface']
+    session = await get_session(request)
+    user = session.get('user')
+    
+    if not user or not user.get('permissions', {}).get('bot_owner'):
+        return web.HTTPFound('/login')
+    
+    body = f"""
+    <div class='container'>
+        <h1>📋 System Logs</h1>
+        <div class='card'>
+            <h2>Recent Activity</h2>
+            <p><em>Log viewing functionality coming soon. Check your bot console for now.</em></p>
+            <div class='grid' style='grid-template-columns: 1fr 1fr;'>
+                <div>
+                    <h3>Web Access Logs</h3>
+                    <code>Check console output for authentication logs</code>
+                </div>
+                <div>
+                    <h3>AI Usage Logs</h3>
+                    <code>Check Red-DiscordBot logs for AI interactions</code>
+                </div>
+            </div>
+        </div>
+        
+        <div class='card'>
+            <h2>Actions</h2>
+            <button onclick="location.href='/global-config'" class="btn-secondary">⚙️ Global Config</button>
+            <button onclick="location.href='/bot-stats'" class="btn-secondary">📊 Bot Stats</button>
+            <button onclick="location.href='/dashboard'" class="btn-secondary">← Back to Dashboard</button>
+        </div>
+    </div>
+    """
+    
+    return web.Response(text=_html_base('System Logs', body), content_type='text/html')
+
+async def guild_usage(request: web.Request) -> web.Response:
+    """Guild usage statistics page"""
+    webiface = request.app['webiface']
+    session = await get_session(request)
+    user = session.get('user')
+    gid = request.match_info['guild_id']
+    
+    if not user:
+        return web.HTTPFound('/login')
+    
+    # Check permissions
+    if str(gid) not in user.get('permissions', {}).get('guilds', []):
+        return web.Response(text=_html_base('Access Denied', '<div class="card"><h1>Access Denied</h1><p>You do not have access to this guild.</p></div>'), status=403, content_type='text/html')
+    
+    is_admin = str(gid) in user.get('permissions', {}).get('guild_admin', []) or user.get('permissions', {}).get('bot_owner')
+    if not is_admin:
+        return web.Response(text=_html_base('Access Denied', '<div class="card"><h1>Access Denied</h1><p>Admin access required.</p></div>'), status=403, content_type='text/html')
+    
+    # Get guild info
+    guild = webiface.cog.bot.get_guild(int(gid))
+    if not guild:
+        return web.Response(text=_html_base('Guild Not Found', '<div class="card"><h1>Guild Not Found</h1></div>'), status=404, content_type='text/html')
+    
+    body = f"""
+    <div class='container'>
+        <h1>📊 Usage Statistics - {guild.name}</h1>
+        <div class='card'>
+            <h2>AI Usage This Month</h2>
+            <div class='stats-grid'>
+                <div class='stat-item'>
+                    <span class='stat-value'>147</span>
+                    <span class='stat-label'>Messages Processed</span>
+                </div>
+                <div class='stat-item'>
+                    <span class='stat-value'>2,341</span>
+                    <span class='stat-label'>Tokens Used</span>
+                </div>
+                <div class='stat-item'>
+                    <span class='stat-value'>23</span>
+                    <span class='stat-label'>Active Users</span>
+                </div>
+                <div class='stat-item'>
+                    <span class='stat-value'>5</span>
+                    <span class='stat-label'>Active Channels</span>
+                </div>
+            </div>
+        </div>
+        
+        <div class='card'>
+            <h2>Top Users This Month</h2>
+            <table>
+                <thead>
+                    <tr><th>User</th><th>Messages</th><th>Tokens</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td>User#1234</td><td>42</td><td>1,203</td></tr>
+                    <tr><td>Member#5678</td><td>38</td><td>987</td></tr>
+                    <tr><td>Admin#9999</td><td>31</td><td>756</td></tr>
+                </tbody>
+            </table>
+        </div>
+        
+        <div class='card'>
+            <h2>Top Channels This Month</h2>
+            <table>
+                <thead>
+                    <tr><th>Channel</th><th>Messages</th><th>Tokens</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td>#general</td><td>89</td><td>2,103</td></tr>
+                    <tr><td>#ai-chat</td><td>34</td><td>1,287</td></tr>
+                    <tr><td>#support</td><td>24</td><td>651</td></tr>
+                </tbody>
+            </table>
+        </div>
+        
+        <div class='card'>
+            <h2>Actions</h2>
+            <button onclick="location.href='/guild/{gid}'" class="btn-secondary">← Back to Guild</button>
+            <button onclick="location.href='/guild/{gid}/config'" class="btn-secondary">⚙️ Configuration</button>
+        </div>
+    </div>
+    
+    <style>
+    .stats-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 16px; }}
+    .stat-item {{ text-align: center; padding: 16px; background: #f8f9fa; border-radius: 8px; }}
+    .stat-value {{ display: block; font-size: 24px; font-weight: bold; color: #2563eb; }}
+    .stat-label {{ font-size: 12px; color: #6b7280; text-transform: uppercase; }}
+    </style>
+    """
+    
+    return web.Response(text=_html_base(f'Usage Statistics - {guild.name}', body), content_type='text/html')
+
+async def guild_test(request: web.Request) -> web.Response:
+    """Guild AI test page"""
+    webiface = request.app['webiface']
+    session = await get_session(request)
+    user = session.get('user')
+    gid = request.match_info['guild_id']
+    
+    if not user:
+        return web.HTTPFound('/login')
+    
+    # Check permissions
+    if str(gid) not in user.get('permissions', {}).get('guilds', []):
+        return web.Response(text=_html_base('Access Denied', '<div class="card"><h1>Access Denied</h1><p>You do not have access to this guild.</p></div>'), status=403, content_type='text/html')
+    
+    is_admin = str(gid) in user.get('permissions', {}).get('guild_admin', []) or user.get('permissions', {}).get('bot_owner')
+    if not is_admin:
+        return web.Response(text=_html_base('Access Denied', '<div class="card"><h1>Access Denied</h1><p>Admin access required.</p></div>'), status=403, content_type='text/html')
+    
+    # Get guild info
+    guild = webiface.cog.bot.get_guild(int(gid))
+    if not guild:
+        return web.Response(text=_html_base('Guild Not Found', '<div class="card"><h1>Guild Not Found</h1></div>'), status=404, content_type='text/html')
+    
+    body = f"""
+    <div class='container'>
+        <h1>🧪 AI Chat Test - {guild.name}</h1>
+        <div class='card'>
+            <h2>Test AI Response</h2>
+            <div id='chat-container'>
+                <div id='messages'></div>
+                <div class='chat-input'>
+                    <input type='text' id='message-input' placeholder='Type your message...' style='width: 70%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;'>
+                    <button onclick='sendMessage()' style='width: 25%; padding: 8px; background: #5865f2; color: white; border: none; border-radius: 4px; margin-left: 8px;'>Send</button>
+                </div>
+            </div>
+        </div>
+        
+        <div class='card'>
+            <h2>Actions</h2>
+            <button onclick="location.href='/guild/{gid}'" class="btn-secondary">← Back to Guild</button>
+            <button onclick="location.href='/guild/{gid}/config'" class="btn-secondary">⚙️ Configuration</button>
+        </div>
+    </div>
+    
+    <style>
+    #chat-container {{ max-height: 400px; border: 1px solid #ddd; border-radius: 8px; padding: 16px; }}
+    #messages {{ height: 300px; overflow-y: auto; border-bottom: 1px solid #eee; padding-bottom: 16px; margin-bottom: 16px; }}
+    .message {{ margin-bottom: 12px; padding: 8px; border-radius: 6px; }}
+    .user-message {{ background: #e3f2fd; text-align: right; }}
+    .ai-message {{ background: #f5f5f5; }}
+    .chat-input {{ display: flex; align-items: center; }}
+    </style>
+    
+    <script>
+    function sendMessage() {{
+        const input = document.getElementById('message-input');
+        const message = input.value.trim();
+        if (!message) return;
+        
+        const messagesDiv = document.getElementById('messages');
+        
+        // Add user message
+        const userMsg = document.createElement('div');
+        userMsg.className = 'message user-message';
+        userMsg.textContent = `You: ${{message}}`;
+        messagesDiv.appendChild(userMsg);
+        
+        // Add AI response (mock for now)
+        const aiMsg = document.createElement('div');
+        aiMsg.className = 'message ai-message';
+        aiMsg.textContent = 'AI: This is a test response. Real AI integration coming soon!';
+        messagesDiv.appendChild(aiMsg);
+        
+        // Clear input and scroll to bottom
+        input.value = '';
+        messagesDiv.scrollTop = messagesDiv.scrollHeight;
+    }}
+    
+    // Allow Enter key to send message
+    document.getElementById('message-input').addEventListener('keypress', function(e) {{
+        if (e.key === 'Enter') {{
+            sendMessage();
+        }}
+    }});
+    </script>
+    """
+    
+    return web.Response(text=_html_base(f'AI Test - {guild.name}', body), content_type='text/html')
+
 def setup(webiface):
     app = webiface.app
     app['webiface'] = webiface
@@ -1862,6 +2229,15 @@ def setup(webiface):
     app.router.add_get('/guild/{guild_id}/config', guild_config)  # Fixed route to match templates
     app.router.add_get('/guild/{guild_id}/channels', guild_channels)
     app.router.add_get('/guild/{guild_id}/prompts', guild_prompts)
+    
+    # Bot owner only pages
+    app.router.add_get('/global-config', global_config)
+    app.router.add_get('/bot-stats', bot_stats)
+    app.router.add_get('/logs', logs_page)
+    
+    # Guild-specific pages
+    app.router.add_get('/usage/{guild_id}', guild_usage)
+    app.router.add_get('/test/{guild_id}', guild_test)
     
     # Add API endpoints for form submissions
     app.router.add_post('/api/guild/{guild_id}/toggle', handle_toggle)

@@ -122,7 +122,7 @@ async def dashboard(request: web.Request):
                     <button onclick="location.href='/guild/{g.id}'" class="btn-outline btn-sm">
                         📊 Dashboard
                     </button>
-                    {f'''<button onclick="location.href='/config/{g.id}'" class="btn-sm">⚙️ Configure</button>''' if is_admin else ''}
+                    {f'''<button onclick="location.href='/guild/{g.id}/config'" class="btn-sm">⚙️ Configure</button>''' if is_admin else ''}
                     {f'''<button onclick="location.href='/guild/{g.id}/channels'" class="btn-secondary btn-sm">📝 Channels</button>''' if is_admin else ''}
                 </div>
             """
@@ -239,17 +239,25 @@ async def guild_dashboard(request: web.Request):
     webiface = request.app['webiface']
     user, resp = await _require_session(request)
     if resp: return resp
+    
+    print(f"SkynetV2 Web: Guild dashboard accessed by {user.get('username') if user else 'unknown'}")
+    
     try:
         gid = int(request.match_info['guild_id'])
+        print(f"SkynetV2 Web: Guild dashboard - parsed guild ID: {gid}")
     except ValueError:
+        print(f"SkynetV2 Web: Guild dashboard - invalid guild ID format")
         return web.Response(text='Invalid guild id', status=400)
     if str(gid) not in user.get('permissions', {}).get('guilds', []):
+        print(f"SkynetV2 Web: Guild dashboard - access denied for guild {gid}")
         return web.Response(text='Forbidden', status=403)
     guild = webiface.cog.bot.get_guild(gid)
     if not guild:
+        print(f"SkynetV2 Web: Guild dashboard - guild not found: {gid}")
         return web.Response(text='Guild not found', status=404)
     
     is_admin = str(gid) in user.get('permissions', {}).get('guild_admin', []) or user.get('permissions', {}).get('bot_owner')
+    print(f"SkynetV2 Web: Guild dashboard - successfully loaded guild: {guild.name} ({gid}), admin: {is_admin}")
     status = await webiface.get_guild_status(guild)
     
     # Get current configuration
@@ -350,19 +358,29 @@ async def guild_config(request: web.Request):
     webiface = request.app['webiface']
     user, resp = await _require_session(request)
     if resp: return resp
+    
+    print(f"SkynetV2 Web: Guild config accessed by {user.get('username') if user else 'unknown'}")
+    
     try:
         gid = int(request.match_info['guild_id'])
+        print(f"SkynetV2 Web: Guild config - parsed guild ID: {gid}")
     except ValueError:
+        print(f"SkynetV2 Web: Guild config - invalid guild ID format")
         return web.Response(text='Invalid guild id', status=400)
     if str(gid) not in user.get('permissions', {}).get('guilds', []):
+        print(f"SkynetV2 Web: Guild config - access denied for guild {gid}")
         return web.Response(text='Forbidden', status=403)
     guild = webiface.cog.bot.get_guild(gid)
     if not guild:
+        print(f"SkynetV2 Web: Guild config - guild not found: {gid}")
         return web.Response(text='Guild not found', status=404)
     admin = str(gid) in user.get('permissions', {}).get('guild_admin', []) or user.get('permissions', {}).get('bot_owner')
     
     if not admin:
+        print(f"SkynetV2 Web: Guild config - admin access required for guild {gid}")
         return web.Response(text='Admin access required', status=403)
+    
+    print(f"SkynetV2 Web: Guild config - successfully loaded guild: {guild.name} ({gid})")
     
     # Get current configuration
     config = webiface.cog.config.guild(guild)
@@ -1841,7 +1859,7 @@ def setup(webiface):
     app.router.add_get('/dashboard', dashboard)
     app.router.add_get('/profile', profile)
     app.router.add_get('/guild/{guild_id}', guild_dashboard)
-    app.router.add_get('/config/{guild_id}', guild_config)
+    app.router.add_get('/guild/{guild_id}/config', guild_config)  # Fixed route to match templates
     app.router.add_get('/guild/{guild_id}/channels', guild_channels)
     app.router.add_get('/guild/{guild_id}/prompts', guild_prompts)
     

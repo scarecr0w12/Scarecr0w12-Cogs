@@ -271,6 +271,15 @@ async def guild_dashboard(request: web.Request):
     status_color = 'enabled' if enabled else 'disabled'
     listening_status = 'enabled' if listening_config.get('enabled') else 'disabled'
     
+    # DEBUG: Print what gid value will be used in JavaScript
+    print(f"SkynetV2 Web: About to render JavaScript with gid = {gid} (type: {type(gid)})")
+    print(f"SkynetV2 Web: String representation: '{str(gid)}'")
+    print(f"SkynetV2 Web: Guild ID from guild object: {guild.id} (type: {type(guild.id)})")
+    
+    # Use guild.id directly instead of gid to test
+    guild_id_for_js = guild.id
+    print(f"SkynetV2 Web: Using guild_id_for_js = {guild_id_for_js}")
+
     # Tools status with toggles (admin only)
     tools_html = ""
     if is_admin:
@@ -293,14 +302,14 @@ async def guild_dashboard(request: web.Request):
             <div class='form-group'>
                 <div class='form-row'>
                     <label>Enable/Disable Bot:</label>
-                    <div class='toggle {"on" if enabled else ""}' onclick='toggleSetting({gid}, "enabled", {str(not enabled).lower()})'></div>
+                    <div class='toggle {"on" if enabled else ""}' onclick='toggleSetting({guild_id_for_js}, "enabled", {str(not enabled).lower()})'></div>
                     <span class='status-badge status-{status_color}'>{status_color.title()}</span>
                 </div>
             </div>
             <div class='form-group'>
                 <div class='form-row'>
                     <label>Passive Listening:</label>
-                    <div class='toggle {"on" if listening_config.get("enabled") else ""}' onclick='toggleSetting({gid}, "listening_enabled", {str(not listening_config.get("enabled", False)).lower()})'></div>
+                    <div class='toggle {"on" if listening_config.get("enabled") else ""}' onclick='toggleSetting({guild_id_for_js}, "listening_enabled", {str(not listening_config.get("enabled", False)).lower()})'></div>
                     <span class='status-badge status-{listening_status}'>{listening_status.title()}</span>
                 </div>
             </div>
@@ -316,7 +325,7 @@ async def guild_dashboard(request: web.Request):
             tools_html += f"""
                 <div class='form-row'>
                     <label>{tool.replace('_', ' ').title()}:</label>
-                    <div class='toggle {"on" if tool_enabled else ""}' onclick='toggleSetting({gid}, "tool_{tool}", {str(not tool_enabled).lower()})'></div>
+                    <div class='toggle {"on" if tool_enabled else ""}' onclick='toggleSetting({guild_id_for_js}, "tool_{tool}", {str(not tool_enabled).lower()})'></div>
                     <span class='status-badge status-{tool_status}'>{tool_status.title()}</span>
                 </div>
             """
@@ -340,11 +349,11 @@ async def guild_dashboard(request: web.Request):
         actions_html = f"""
         <div class='card'>
             <h2>Quick Actions</h2>
-            <button onclick="location.href='/guild/{gid}/config'">⚙️ Full Configuration</button>
-            <button onclick="location.href='/guild/{gid}/channels'">📺 Channel Settings</button>
-            <button onclick="location.href='/guild/{gid}/prompts'">💬 Prompt Management</button>
-            <button onclick="location.href='/test/{gid}'" class="secondary">🧪 Test AI Chat</button>
-            <button onclick="location.href='/usage/{gid}'" class="secondary">📊 Usage Statistics</button>
+            <button onclick="location.href='/guild/{guild_id_for_js}/config'">⚙️ Full Configuration</button>
+            <button onclick="location.href='/guild/{guild_id_for_js}/channels'">📺 Channel Settings</button>
+            <button onclick="location.href='/guild/{guild_id_for_js}/prompts'">💬 Prompt Management</button>
+            <button onclick="location.href='/test/{guild_id_for_js}'" class="secondary">🧪 Test AI Chat</button>
+            <button onclick="location.href='/usage/{guild_id_for_js}'" class="secondary">📊 Usage Statistics</button>
         </div>
         """
     

@@ -2130,6 +2130,37 @@ class SkynetV2(ToolsMixin, MemoryMixin, StatsMixin, ListenerMixin, Orchestration
         
         await ctx.send(embed=embed)
 
+    @ai_group.command(name="test_new_system")
+    @commands.bot_has_permissions(send_messages=True)
+    async def ai_test_new_system(self, ctx: commands.Context):
+        """Test if the new conversation system is loaded and working."""
+        try:
+            # Check if new modules are imported
+            from .message_utils import MessageChunker, ConversationManager
+            
+            # Test basic functionality
+            test_text = "This is a test of the new conversation system with enhanced message handling and memory integration."
+            chunks = MessageChunker.chunk_message(test_text, 50)
+            
+            # Check if conversation manager works
+            context_test = ConversationManager.should_include_context(ctx.message, "mention")
+            
+            response = f"✅ **New Conversation System Status: LOADED**\n\n"
+            response += f"📦 **MessageChunker**: Working (created {len(chunks)} chunks)\n"
+            response += f"🧠 **ConversationManager**: Working (should_include_context: {context_test})\n"
+            response += f"🎯 **Listener Code**: Version 1.2.3 should be in console logs\n\n"
+            response += f"**Next Steps:**\n"
+            response += f"1. Check bot console for: `🚀 [SkynetV2] NEW LISTENER CODE LOADED`\n"
+            response += f"2. Try mentioning the bot in a message\n"
+            response += f"3. Use `{ctx.prefix}ai debug` to check passive listening status"
+            
+            await ctx.send(response)
+            
+        except ImportError as e:
+            await ctx.send(f"❌ **New system NOT loaded**: Import error - {e}")
+        except Exception as e:
+            await ctx.send(f"⚠️ **System partially loaded**: Error - {e}")
+
     @ai_group.command(name="debug")
     @checks.is_owner()
     async def ai_debug(self, ctx: commands.Context, guild_id: Optional[int] = None):

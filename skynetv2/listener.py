@@ -6,6 +6,8 @@ from .api.base import ChatMessage
 from .logging_system import log_ai_request, log_listening_event, log_rate_limit_hit, log_error_event
 from .message_utils import MessageChunker, ConversationManager
 
+print("🚀 [SkynetV2] NEW LISTENER CODE LOADED WITH CONVERSATION SYSTEM v1.2.3")
+
 class ListenerMixin:
     """Passive on_message logic extracted from main cog."""
 
@@ -23,7 +25,7 @@ class ListenerMixin:
             return
         guild = message.guild
         
-        print(f"[SkynetV2 Listener] Processing message from {message.author} in #{message.channel.name} - Guild: {guild.name}")
+        print(f"🚨 [SkynetV2 Listener v1.2.3] PROCESSING MESSAGE: '{message.content}' from {message.author.display_name} in #{message.channel.name}")
         
         # Check if the cog is enabled for this guild
         cog_enabled = await self.config.guild(guild).enabled()

@@ -274,7 +274,20 @@ async def guild_dashboard(request: web.Request):
     # Tools status with toggles (admin only)
     tools_html = ""
     if is_admin:
+        # DEBUG: Add guild ID debugging info
+        debug_info = f"""
+        <div class='card debug-info' style='background-color: #ffffcc; border: 2px solid #ffcc00; margin-bottom: 20px;'>
+            <h3>DEBUG: Guild ID Information</h3>
+            <p><strong>Raw URL Guild ID:</strong> {request.match_info['guild_id']}</p>
+            <p><strong>Parsed gid variable:</strong> {gid}</p>
+            <p><strong>Guild object ID:</strong> {guild.id}</p>
+            <p><strong>gid type:</strong> {type(gid)}</p>
+            <p><strong>guild.id type:</strong> {type(guild.id)}</p>
+        </div>
+        """
+        
         tools_html = f"""
+        {debug_info}
         <div class='card'>
             <h2>Tools Configuration</h2>
             <div class='form-group'>
@@ -1784,6 +1797,10 @@ def _html_base(title: str, body: str, current_page: str = '') -> str:
     <script>
     // Enhanced JavaScript for better UX
     function toggleSetting(guildId, setting, value) {{
+        // DEBUG: Log the guild ID values
+        console.log('DEBUG toggleSetting: guildId parameter =', guildId, 'type =', typeof guildId);
+        console.log('DEBUG toggleSetting: API URL will be', `/api/guild/${{guildId}}/toggle`);
+        
         const btn = event.target;
         btn.disabled = true;
         btn.innerHTML = '<div class="loading"></div> Saving...';

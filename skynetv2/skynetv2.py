@@ -2201,6 +2201,124 @@ class SkynetV2(ToolsMixin, MemoryMixin, StatsMixin, ListenerMixin, Orchestration
         else:
             embed.add_field(name="🌐 Web Interface", value="❌ Not running", inline=True)
         
+        # Passive listening debug info for target guild
+        if target_guild:
+            try:
+                cog_enabled = await self.config.guild(target_guild).enabled()
+                listening_config = await self.config.guild(target_guild).listening()
+                channel_listening = await self.config.guild(target_guild).channel_listening()
+                
+                # Format listening status
+                listening_status = "❌ Disabled"
+                if listening_config and listening_config.get("enabled", False):
+                    mode = listening_config.get("mode", "mention")
+                    keywords = listening_config.get("keywords", [])
+                    if mode == "all":
+                        listening_status = "✅ All Messages"
+                    elif mode == "mention":
+                        listening_status = "✅ Mentions Only"  
+                    elif mode == "keyword":
+                        kw_str = ", ".join(keywords[:3]) if keywords else "none"
+                        listening_status = f"✅ Keywords: {kw_str}"
+                
+                embed.add_field(
+                    name="🎧 Passive Listening",
+                    value=f"**Cog Enabled:** {cog_enabled}\n**Listening:** {listening_status}\n**Channel Overrides:** {len(channel_listening)}",
+                    inline=False
+                )
+            except Exception as e:
+                embed.add_field(
+                    name="🎧 Passive Listening",
+                    value=f"❌ Error checking config: {e}",
+                    inline=False
+                )
+        
+        await ctx.send(embed=embed)
+
+    @ai_group.command(name="listening")
+    @commands.guild_only()
+    async def ai_listening_status(self, ctx: commands.Context):
+        """Check passive listening configuration and status for this guild."""
+        guild = ctx.guild
+        embed = discord.Embed(title="🎧 Passive Listening Status", color=0x3b82f6)
+        
+        try:
+            # Main cog status
+            cog_enabled = await self.config.guild(guild).enabled()
+            embed.add_field(
+                name="🤖 SkynetV2 Status", 
+                value="✅ Enabled" if cog_enabled else "❌ Disabled",
+                inline=False
+            )
+            
+            if not cog_enabled:
+                embed.add_field(
+                    name="⚠️ Issue", 
+                    value="SkynetV2 cog is disabled for this guild. Enable it first using the web interface or `+ai web start`.",
+                    inline=False
+                )
+            
+            # Global listening config
+            listening_config = await self.config.guild(guild).listening()
+            listening_enabled = listening_config.get("enabled", False) if listening_config else False
+            mode = listening_config.get("mode", "mention") if listening_config else "mention"
+            keywords = listening_config.get("keywords", []) if listening_config else []
+            
+            # Format mode description
+            mode_desc = {
+                "mention": "Responds only when @mentioned",
+                "keyword": f"Responds to keywords: {', '.join(keywords) if keywords else 'none set'}",
+                "all": "Responds to ALL messages in allowed channels"
+            }.get(mode, "Unknown mode")
+            
+            embed.add_field(
+                name="🎧 Global Listening",
+                value=f"**Status:** {'✅ Enabled' if listening_enabled else '❌ Disabled'}\n**Mode:** {mode_desc}",
+                inline=False
+            )
+            
+            # Channel overrides
+            channel_listening = await self.config.guild(guild).channel_listening()
+            if channel_listening:
+                channel_info = []
+                for channel_id, config in list(channel_listening.items())[:5]:  # Show first 5
+                    channel = guild.get_channel(int(channel_id))
+                    channel_name = f"#{channel.name}" if channel else f"Unknown ({channel_id})"
+                    status = "✅" if config.get("enabled", False) else "❌"
+                    channel_info.append(f"{status} {channel_name}")
+                
+                channel_list = "\n".join(channel_info)
+                if len(channel_listening) > 5:
+                    channel_list += f"\n... and {len(channel_listening) - 5} more"
+                    
+                embed.add_field(
+                    name=f"📺 Channel Overrides ({len(channel_listening)})",
+                    value=channel_list,
+                    inline=False
+                )
+            
+            # Troubleshooting tips
+            if not cog_enabled or not listening_enabled:
+                tips = []
+                if not cog_enabled:
+                    tips.append("• Enable SkynetV2 cog in web interface")
+                if not listening_enabled:
+                    tips.append("• Enable 'Passive Listening' toggle in web interface")
+                    tips.append(f"• Configure listening mode at: https://ai.arcadiumpanel.com/guild/{guild.id}/config")
+                
+                embed.add_field(
+                    name="🔧 Next Steps",
+                    value="\n".join(tips),
+                    inline=False
+                )
+        
+        except Exception as e:
+            embed.add_field(
+                name="❌ Error", 
+                value=f"Failed to check configuration: {e}",
+                inline=False
+            )
+        
         await ctx.send(embed=embed)
 
     # ----------------

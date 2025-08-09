@@ -10,6 +10,63 @@ Implemented commands (prefix + slash mirrors where noted).
 - [p]ai chat message
 - [p]ai chatstream message (streaming prefix variant)
 
+## Provider Management
+
+### Provider Configuration
+- /skynet provider list (show all configured providers)
+- /skynet provider set provider:string model:string (set active provider and model)
+- [p]ai provider list
+- [p]ai provider set <provider> <model>
+
+### API Key Management  
+- /skynet provider key set provider:string key:string global?:bool
+- /skynet provider key show provider:string
+- /skynet provider key remove provider:string global?:bool
+- [p]ai provider key set <provider> <key> [--global]
+- [p]ai provider key show <provider>
+- [p]ai provider key remove <provider> [--global]
+
+### Supported Providers
+- **Cloud**: OpenAI, Anthropic, Groq, Google Gemini
+- **Self-Hosted**: Ollama, LM Studio, LocalAI, vLLM, Text Generation WebUI
+- **Generic**: OpenAI-Compatible (for custom endpoints)
+
+## Model Management
+
+- /skynet model list provider?:string
+- /skynet model set provider:string model:string
+- [p]ai model list [provider]
+- [p]ai model set <provider> <model>
+
+## Per-Channel Configuration
+
+- /skynet channel listening enable/disable
+- /skynet channel mode set mode:string (mention/keyword/all)  
+- /skynet channel keywords set keywords:string
+- [p]ai channel listening enable|disable
+- [p]ai channel mode set <mention|keyword|all>
+- [p]ai channel keywords set <keyword1,keyword2,...>
+
+## Multi-Level Prompting
+
+### System Prompts (Bot Owner Only)
+- /skynet system prompt set template:string
+- [p]ai system prompt set <template>
+
+### Guild Prompts (Admin Only)
+- /skynet guild prompt set prompt:string
+- /skynet guild prompt show
+- /skynet guild prompt clear
+- [p]ai guild prompt set <prompt>
+- [p]ai guild prompt show|clear
+
+### Member Prompts (Admin Only)
+- /skynet member prompt set user:User prompt:string
+- /skynet member prompt show user:User
+- /skynet member prompt clear user:User
+- [p]ai member prompt set <@user> <prompt>
+- [p]ai member prompt show|clear <@user>
+
 ## Tools
 
 - /skynet tools list

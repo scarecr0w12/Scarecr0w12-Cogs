@@ -13,6 +13,15 @@ def register_config(cog) -> Config:
         "providers": {
             "default": "openai",
             "openai": {"api_key": None},
+            "anthropic": {"api_key": None},
+            "groq": {"api_key": None},
+            "gemini": {"api_key": None},
+            "ollama": {"base_url": "http://localhost:11434/v1"},
+            "lmstudio": {"base_url": "http://localhost:1234/v1"},
+            "localai": {"base_url": None, "api_key": None},
+            "vllm": {"base_url": None, "api_key": None},
+            "text_generation_webui": {"base_url": "http://localhost:5000/v1"},
+            "openai_compatible": {"base_url": None, "api_key": None},
             "serp": {"api_key": None},
             "firecrawl": {"api_key": None},
         },
@@ -32,6 +41,13 @@ def register_config(cog) -> Config:
         "web_session_key": None,  # Auto-generated encryption key
         # Prompt templates (global scope): name -> {content:str, variables:list[str], created:int, updated:int, scope:'global'}
         "prompts": {},
+        # System-level prompts for different contexts
+        "system_prompts": {
+            "default": "You are a helpful AI assistant integrated into Discord. Be concise and helpful.",
+            "creative": "You are a creative AI assistant. Be imaginative and inspiring in your responses.",
+            "technical": "You are a technical AI assistant. Provide detailed, accurate technical information.",
+            "casual": "You are a casual, friendly AI assistant. Keep responses conversational and relaxed."
+        },
     }
 
     default_guild = {
@@ -61,6 +77,8 @@ def register_config(cog) -> Config:
         # Autosearch safety caps (chars for aggregated scrape outputs) + behavior flags
         "autosearch_caps": {"scrape_chars": 4000, "autoscrape_single": False},
         "listening": {"enabled": False, "mode": "mention", "keywords": []},
+        # Per-channel listening configuration: channel_id -> {enabled: bool, mode: str, keywords: list}
+        "channel_listening": {},
         "tools": {"enabled": {}},
         # Added pruning policy (max_items hard cap across messages list; max_age_days age trimming on write)
         "memory": {"default_limit": 10, "per_channel": {}, "prune": {"max_items": 400, "max_age_days": 30}},
@@ -74,6 +92,10 @@ def register_config(cog) -> Config:
         "web_tokens": {},
         # Prompt templates (guild scope): name -> {content:str, variables:list[str], created:int, updated:int, scope:'guild'}
         "prompts": {},
+        # Guild-specific system prompts override global ones
+        "system_prompts": {},
+        # Per-member prompt configurations: user_id -> {system_prompt: str, custom_prompts: dict}
+        "member_prompts": {},
     }
 
     conf.register_global(**default_global)

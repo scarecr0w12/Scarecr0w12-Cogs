@@ -22,9 +22,37 @@ class MemoryMixin:
         per = mem.get("per_channel", {}).get(str(channel_id), {})
         return list(per.get("messages", []))
 
-    async def _memory_build_context(self, guild: discord.Guild, channel_id: int) -> List[ChatMessage]:
+    async def _build_system_prompt(self, guild: discord.Guild, user: discord.Member = None) -> str:
+        """Build hierarchical system prompt: System > Guild > Member"""
+        global_config = await self.config.system_prompts()
+        guild_config = await self.config.guild(guild).system_prompts()
+        
+        # Start with global system prompt
+        system_prompt = global_config.get('system', 'You are a helpful AI assistant.')
+        
+        # Add guild-level prompt if configured
+        guild_prompt = guild_config.get('guild', '')
+        if guild_prompt:
+            system_prompt += f"\n\nGuild Context: {guild_prompt}"
+        
+        # Add member-level prompt if user provided and configured
+        if user:
+            member_prompts = guild_config.get('members', {})
+            member_prompt = member_prompts.get(str(user.id), '')
+            if member_prompt:
+                system_prompt += f"\n\nUser Context: {member_prompt}"
+        
+        return system_prompt.strip()
+
+    async def _memory_build_context(self, guild: discord.Guild, channel_id: int, user: discord.Member = None) -> List[ChatMessage]:
         msgs = await self._memory_get_messages(guild, channel_id)
         out: List[ChatMessage] = []
+        
+        # Add system prompt as first message
+        system_prompt = await self._build_system_prompt(guild, user)
+        out.append(ChatMessage(role="system", content=system_prompt))
+        
+        # Add conversation history
         for m in msgs[-await self._memory_get_limit(guild, channel_id):]:
             role = m.get("role", "user")
             content = m.get("content", "")

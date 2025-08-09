@@ -7,13 +7,32 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ## [Unreleased]
 
 ### Added
-- (none)
+- Multi-provider AI system with comprehensive cloud and self-hosted provider support
+- Google Gemini provider integration with full streaming and usage tracking
+- Anthropic Claude provider with native SDK integration
+- Groq provider for high-speed inference
+- Self-hosted provider support: Ollama, LM Studio, LocalAI, vLLM, Text Generation WebUI
+- Generic OpenAI-compatible provider for custom endpoints
+- Per-channel listening configuration with channel-specific overrides
+- Multi-level prompting system (System → Guild → Member hierarchy)
+- Interactive web management interface with comprehensive configuration forms
+- Channel-specific configuration page with per-channel listening settings
+- Prompt management interface with member-specific customization
+- Enhanced provider configuration with cloud/self-hosted categorization
 
 ### Changed
-- (none)
+- Completely refactored provider system to use configuration dictionaries instead of API keys
+- Enhanced `resolve_provider_and_model()` to return full provider configurations
+- Updated `build_provider()` to support all new provider types with proper configuration
+- Expanded configuration schema to support all provider types and new features
+- Enhanced web interface with interactive forms, toggles, and real-time updates
+- Updated memory context building to include multi-level prompting system
+- Improved listener logic with per-channel configuration support
 
 ### Fixed
-- (none)
+- Provider resolution now properly handles configuration data for all provider types
+- Web interface session management and permission checking
+- Configuration persistence for complex provider setups
 
 ## [1.4.0] - 2025-08-08
 

@@ -20,9 +20,23 @@ class ListenerMixin:
         if message.author.bot or not message.guild:
             return
         guild = message.guild
-        listening = await self.config.guild(guild).listening()
-        if not listening or not listening.get("enabled", False):
-            return
+        
+        # Check per-channel listening configuration first
+        channel_listening_config = await self.config.guild(guild).channel_listening()
+        channel_id = str(message.channel.id)
+        
+        # Channel-specific override
+        if channel_id in channel_listening_config:
+            channel_config = channel_listening_config[channel_id]
+            if not channel_config.get("enabled", False):
+                return
+            listening = channel_config
+        else:
+            # Fall back to global guild listening config
+            listening = await self.config.guild(guild).listening()
+            if not listening or not listening.get("enabled", False):
+                return
+        
         mode = listening.get("mode", "mention")
         content = message.content or ""
         try:
@@ -48,11 +62,11 @@ class ListenerMixin:
         err = await self._check_and_record_usage(guild, message.channel, message.author)
         if err:
             return
-        provider_name, model, api_key = await self.resolve_provider_and_model(guild)
-        if not api_key:
+        provider_name, model, provider_config = await self.resolve_provider_and_model(guild)
+        if not provider_config:
             return
         try:
-            provider = self.build_provider(provider_name, api_key)
+            provider = self.build_provider(provider_name, provider_config)
         except Exception:
             return
         try:

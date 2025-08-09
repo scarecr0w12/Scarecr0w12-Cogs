@@ -25,22 +25,19 @@ AI assistant cog focused on usability, governance, and extensibility.
 
 **Features:**
 
-- Chat (prefix + slash) with streaming support
-- Provider abstraction (OpenAI implemented)
-- Per-channel memory window with show/prune/export/clear + prune policy (max items / max age)
-- Tool registry (ping + dummy websearch) with enable/disable
-- Search abstraction (providers: `dummy`, real `serp` (SerpAPI), `serp-stub` fallback; guild override)
-- Tool-specific rate limits + general cooldown / per-user / per-channel limits (owner bypass)
-- Usage stats: chats, tokens, cost estimate, top users/channels, tool usage & top tools
-- Cost estimation (editable pricing map)
-- Passive listening modes (mention / keyword / all) groundwork
-- Model policy allow/deny lists
-- Diagnostics and model list caching
-- Modular mixins (memory, tools, stats, listener) for maintainability
-- Agent tool orchestration with JSON schemas for AI automation
-- Heuristic autosearch tool (classifies query -> plan; executes search + real scrape/crawl/deep research via Firecrawl when API key configured, placeholder otherwise; optional autoscrape single result)
-- **Web Interface (OAuth2)**: Discord OAuth2 authentication with role-based permissions for guild management, configuration, and monitoring. Supports custom domains with reverse proxy SSL termination.
-- **Prompt Templates (Web)**: Manage reusable prompt snippets (global + guild) with variable interpolation via web dashboard.
+- **Multi-Provider AI System**: Support for OpenAI, Anthropic Claude, Groq, Google Gemini, and self-hosted solutions (Ollama, LM Studio, LocalAI, vLLM, Text Generation WebUI)
+- **Chat (prefix + slash)** with streaming support and provider selection
+- **Per-Channel Configuration**: Channel-specific listening modes, keywords, and AI behavior overrides
+- **Multi-Level Prompting**: Hierarchical prompt system (System → Guild → Member) for personalized AI interactions
+- **Advanced Memory System**: Per-channel memory with context building, pruning policies, and conversation history
+- **Comprehensive Web Interface**: OAuth2-authenticated management portal with interactive forms and real-time configuration
+- **Tool Registry**: Extensible tool system with ping, websearch, and Firecrawl integration
+- **Search & Research**: Multi-mode search with real scraping, crawling, and deep research capabilities
+- **Rate Limiting & Governance**: Per-user/channel limits, model policies, and usage controls with owner bypass
+- **Usage Analytics**: Token tracking, cost estimation, usage statistics, and performance monitoring
+- **Passive Listening**: Configurable AI responses via mentions, keywords, or all messages
+- **Self-Hosted Support**: Full support for local AI deployments and custom OpenAI-compatible endpoints
+- **Professional Management**: Web-based configuration, prompt management, and system administration
 
 ### Search & Autosearch Overview
 

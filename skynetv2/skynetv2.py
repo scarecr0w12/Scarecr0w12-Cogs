@@ -58,19 +58,87 @@ class SkynetV2(ToolsMixin, MemoryMixin, StatsMixin, ListenerMixin, Orchestration
         default_provider_name = global_providers.get("default", "openai")
         provider_name = (model.get("provider") if isinstance(model, dict) else None) or default_provider_name
 
-        api_key = None
-        if provider_name in gproviders and gproviders[provider_name].get("api_key"):
-            api_key = gproviders[provider_name]["api_key"]
-        else:
-            api_key = global_providers.get(provider_name, {}).get("api_key")
+        # Get provider configuration (guild overrides global)
+        provider_config = {}
+        if provider_name in gproviders:
+            provider_config = gproviders[provider_name].copy()
+        
+        # Merge with global config for missing keys
+        global_config = global_providers.get(provider_name, {})
+        for key, value in global_config.items():
+            if key not in provider_config and value is not None:
+                provider_config[key] = value
 
-        return provider_name, model, api_key
+        return provider_name, model, provider_config
 
-    def build_provider(self, provider_name: str, api_key: Optional[str]):
+    def build_provider(self, provider_name: str, config_data: Dict[str, Any]):
+        """Build provider instance from configuration data"""
         if provider_name == "openai":
+            api_key = config_data.get("api_key")
             if not api_key:
-                raise RuntimeError("Missing API key for openai provider")
+                raise RuntimeError("Missing API key for OpenAI provider")
             return OpenAIProvider(api_key)
+        
+        elif provider_name == "anthropic":
+            from .api.cloud_providers import AnthropicProvider
+            api_key = config_data.get("api_key")
+            if not api_key:
+                raise RuntimeError("Missing API key for Anthropic provider")
+            return AnthropicProvider(api_key)
+        
+        elif provider_name == "groq":
+            from .api.cloud_providers import GroqProvider
+            api_key = config_data.get("api_key")
+            if not api_key:
+                raise RuntimeError("Missing API key for Groq provider")
+            return GroqProvider(api_key)
+        
+        elif provider_name == "gemini":
+            from .api.cloud_providers import GeminiProvider
+            api_key = config_data.get("api_key")
+            if not api_key:
+                raise RuntimeError("Missing API key for Gemini provider")
+            return GeminiProvider(api_key)
+        
+        elif provider_name == "ollama":
+            from .api.local_providers import OllamaProvider
+            base_url = config_data.get("base_url", "http://localhost:11434/v1")
+            return OllamaProvider(base_url)
+        
+        elif provider_name == "lmstudio":
+            from .api.local_providers import LMStudioProvider
+            base_url = config_data.get("base_url", "http://localhost:1234/v1")
+            return LMStudioProvider(base_url)
+        
+        elif provider_name == "localai":
+            from .api.local_providers import LocalAIProvider
+            base_url = config_data.get("base_url")
+            api_key = config_data.get("api_key", "")
+            if not base_url:
+                raise RuntimeError("Missing base_url for LocalAI provider")
+            return LocalAIProvider(base_url, api_key)
+        
+        elif provider_name == "vllm":
+            from .api.local_providers import VLLMProvider
+            base_url = config_data.get("base_url")
+            api_key = config_data.get("api_key", "")
+            if not base_url:
+                raise RuntimeError("Missing base_url for vLLM provider")
+            return VLLMProvider(base_url, api_key)
+        
+        elif provider_name == "text_generation_webui":
+            from .api.local_providers import TextGenerationWebUIProvider
+            base_url = config_data.get("base_url", "http://localhost:5000/v1")
+            return TextGenerationWebUIProvider(base_url)
+        
+        elif provider_name == "openai_compatible":
+            from .api.openai_compatible import OpenAICompatibleProvider
+            base_url = config_data.get("base_url")
+            api_key = config_data.get("api_key", "")
+            if not base_url:
+                raise RuntimeError("Missing base_url for OpenAI-compatible provider")
+            return OpenAICompatibleProvider(api_key, base_url)
+        
         raise RuntimeError(f"Unsupported provider: {provider_name}")
 
     async def _estimate_and_record_cost(self, guild: discord.Guild, provider: str, model_name: str, prompt_tokens: int, completion_tokens: int):
@@ -85,17 +153,17 @@ class SkynetV2(ToolsMixin, MemoryMixin, StatsMixin, ListenerMixin, Orchestration
                 c = usage.setdefault("cost", {"usd": 0.0})
                 c["usd"] = float(c.get("usd", 0.0)) + float(delta)
 
-    async def _models_cached(self, provider_name: str, api_key: Optional[str]) -> List[str]:
-        if not api_key:
-            return []
-        key = (provider_name, api_key)
+    async def _models_cached(self, provider_name: str, provider_config: Dict[str, Any]) -> List[str]:
+        # Create cache key from provider config
+        config_str = str(sorted(provider_config.items()))
+        key = (provider_name, config_str)
         now = int(time.time())
         if key in self._model_cache:
             ts, models = self._model_cache[key]
             if now - ts < self._model_cache_ttl:
                 return models
         try:
-            provider = self.build_provider(provider_name, api_key)
+            provider = self.build_provider(provider_name, provider_config)
             models = await provider.list_models()
             self._model_cache[key] = (now, models)
             return models
@@ -125,9 +193,9 @@ class SkynetV2(ToolsMixin, MemoryMixin, StatsMixin, ListenerMixin, Orchestration
         guild = interaction.guild
         if guild is None:
             return []
-        provider_name, model, api_key = await self.resolve_provider_and_model(guild)
+        provider_name, model, provider_config = await self.resolve_provider_and_model(guild)
         try:
-            models = await self._models_cached(provider_name, api_key)
+            models = await self._models_cached(provider_name, provider_config)
         except Exception:
             models = [model["name"]] if isinstance(model, dict) and model.get("name") else []
         current_l = current.lower()
@@ -163,12 +231,12 @@ class SkynetV2(ToolsMixin, MemoryMixin, StatsMixin, ListenerMixin, Orchestration
         if err:
             await ctx.send(err)
             return
-        provider_name, model, api_key = await self.resolve_provider_and_model(ctx.guild)
-        if not api_key:
-            await ctx.send("No API key configured. Use `[p]ai provider key set <provider> <key>`.")
+        provider_name, model, provider_config = await self.resolve_provider_and_model(ctx.guild)
+        if not provider_config:
+            await ctx.send("Provider not configured. Use `[p]ai provider key set <provider> <key>`.")
             return
         try:
-            provider = self.build_provider(provider_name, api_key)
+            provider = self.build_provider(provider_name, provider_config)
         except Exception as e:
             error_msg = self.error_handler.safe_error_response(e, "provider")
             self.error_handler.log_error(e, "chat_command", {"provider": provider_name})
@@ -180,7 +248,7 @@ class SkynetV2(ToolsMixin, MemoryMixin, StatsMixin, ListenerMixin, Orchestration
             await ctx.send(policy_err)
             return
         async with ctx.typing():
-            base = await self._memory_build_context(ctx.guild, ctx.channel.id)
+            base = await self._memory_build_context(ctx.guild, ctx.channel.id, ctx.author)
             chunks = []
             async for chunk in provider.chat(model=model_name, messages=base + [ChatMessage("user", message)]):
                 chunks.append(chunk)
@@ -212,9 +280,9 @@ class SkynetV2(ToolsMixin, MemoryMixin, StatsMixin, ListenerMixin, Orchestration
         if err:
             await ctx.send(err)
             return
-        provider_name, model, api_key = await self.resolve_provider_and_model(ctx.guild)
-        if not api_key:
-            await ctx.send("No API key configured. Use `[p]ai provider key set <provider> <key>`.")
+        provider_name, model, provider_config = await self.resolve_provider_and_model(ctx.guild)
+        if not provider_config:
+            await ctx.send("Provider not configured. Use `[p]ai provider key set <provider> <key>`.")
             return
         model_name = model["name"] if isinstance(model, dict) else str(model)
         policy_err = await self._is_model_allowed(ctx.guild, provider_name, model_name)
@@ -222,11 +290,11 @@ class SkynetV2(ToolsMixin, MemoryMixin, StatsMixin, ListenerMixin, Orchestration
             await ctx.send(policy_err)
             return
         try:
-            provider = self.build_provider(provider_name, api_key)
+            provider = self.build_provider(provider_name, provider_config)
         except Exception as e:
             await ctx.send(f"Provider error: {e}")
             return
-        base = await self._memory_build_context(ctx.guild, ctx.channel.id)
+        base = await self._memory_build_context(ctx.guild, ctx.channel.id, ctx.author)
         msg = await ctx.send("…")
         buf = ""
         last_edit = 0.0
@@ -548,12 +616,12 @@ class SkynetV2(ToolsMixin, MemoryMixin, StatsMixin, ListenerMixin, Orchestration
         if err:
             await interaction.response.send_message(err, ephemeral=True)
             return
-        provider_name, model, api_key = await self.resolve_provider_and_model(interaction.guild)
-        if not api_key:
-            await interaction.response.send_message("No API key configured. Ask an admin to set one.", ephemeral=True)
+        provider_name, model, provider_config = await self.resolve_provider_and_model(interaction.guild)
+        if not provider_config:
+            await interaction.response.send_message("Provider not configured. Ask an admin to set one.", ephemeral=True)
             return
         try:
-            provider = self.build_provider(provider_name, api_key)
+            provider = self.build_provider(provider_name, provider_config)
         except Exception as e:
             error_msg = self.error_handler.safe_error_response(e, "provider")
             self.error_handler.log_error(e, "slash_chat", {"provider": provider_name})
@@ -564,7 +632,7 @@ class SkynetV2(ToolsMixin, MemoryMixin, StatsMixin, ListenerMixin, Orchestration
         if policy_err:
             await interaction.response.send_message(policy_err, ephemeral=True)
             return
-        base = await self._memory_build_context(interaction.guild, interaction.channel.id)
+        base = await self._memory_build_context(interaction.guild, interaction.channel.id, interaction.user)
         if stream:
             await interaction.response.defer(thinking=True)
             msg = await interaction.followup.send("…")

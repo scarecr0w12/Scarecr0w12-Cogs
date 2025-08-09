@@ -1,33 +1,173 @@
 # Configuration
 
-Scopes and precedence: channel > guild > global. Secrets at global scope only.
+Scopes and precedence: channel > guild > global. Provider credentials at global or guild scope.
 
-## Global
+## Global Configuration
 
-- providers: defaults and credentials
-- model: default provider/model
-- params: temperature, max_tokens, top_p
-- pricing: optional map for estimating cost per model/provider. Example:
+### Providers
+Multi-provider system supporting cloud and self-hosted AI services:
 
 ```json
 {
-  "openai": {
-    "gpt-4o-mini": {
-      "prompt_per_1k": 0.0,
-      "completion_per_1k": 0.0
+  "providers": {
+    "openai": {"api_key": "sk-..."},
+    "anthropic": {"api_key": "ant-..."},
+    "groq": {"api_key": "gsk_..."},
+    "gemini": {"api_key": "AIza..."},
+    "ollama": {"base_url": "http://localhost:11434/v1"},
+    "lmstudio": {"base_url": "http://localhost:1234/v1"},
+    "localai": {"base_url": "http://localhost:8080/v1", "api_key": "optional"},
+    "vllm": {"base_url": "http://localhost:8000/v1", "api_key": "optional"},
+    "text_generation_webui": {"base_url": "http://localhost:5000/v1"},
+    "openai_compatible": {"base_url": "custom-endpoint", "api_key": "optional"}
+  }
+}
+```
+
+### Model Configuration
+Default provider and model selection:
+
+```json
+{
+  "model": {
+    "provider": "openai",
+    "name": "gpt-4o-mini"
+  }
+}
+```
+
+### Parameters
+Default chat parameters:
+
+```json
+{
+  "params": {
+    "temperature": 0.7,
+    "max_tokens": 512,
+    "top_p": 1.0
+  }
+}
+```
+
+### Pricing
+Cost estimation mapping (optional):
+
+```json
+{
+  "pricing": {
+    "openai": {
+      "gpt-4o-mini": {
+        "prompt_per_1k": 0.0,
+        "completion_per_1k": 0.0
+      }
+    },
+    "gemini": {
+      "gemini-1.5-flash": {
+        "prompt_per_1k": 0.0,
+        "completion_per_1k": 0.0
+      }
     }
   }
 }
 ```
 
-- search: { provider } (default `dummy`) – default search provider for tools (providers: dummy, serp, serp-stub)
+### System Prompts
+Global prompt templates (bot owner managed):
 
-## Guild
+```json
+{
+  "system_prompts": {
+    "default": "You are a helpful AI assistant integrated into Discord.",
+    "creative": "You are a creative AI assistant. Be imaginative and inspiring.",
+    "technical": "You are a technical AI assistant. Provide detailed technical information."
+  }
+}
+```
 
-- enabled: bool
-- allowed_roles/channels (future)
-- model/params/persona overrides
-- tools.enabled: mapping tool->bool (persisted state for registry)
+### Search Configuration
+Default search provider:
+
+```json
+{
+  "search": {
+    "provider": "dummy"
+  }
+}
+```
+
+## Guild Configuration
+
+### Basic Settings
+- **enabled**: Enable/disable AI functionality for the guild
+- **model**: Guild-specific model override
+- **params**: Guild-specific parameter overrides (temperature, max_tokens, top_p)
+
+### Multi-Level Prompting
+Hierarchical prompt system for personalized AI interactions:
+
+```json
+{
+  "system_prompts": {
+    "guild": "This is a gaming server focused on MMORPGs.",
+    "members": {
+      "123456789": "This user prefers technical explanations.",
+      "987654321": "This user likes casual, friendly responses."
+    }
+  }
+}
+```
+
+### Per-Channel Listening
+Channel-specific AI behavior overrides:
+
+```json
+{
+  "channel_listening": {
+    "123456789": {
+      "enabled": true,
+      "mode": "keyword",
+      "keywords": ["bot", "ai", "help"]
+    },
+    "987654321": {
+      "enabled": true,
+      "mode": "mention"
+    }
+  }
+}
+```
+
+**Listening Modes:**
+- `mention`: Respond only when bot is mentioned
+- `keyword`: Respond to messages containing specified keywords  
+- `all`: Respond to all messages in the channel
+
+### Global Listening
+Default listening behavior for all channels:
+
+```json
+{
+  "listening": {
+    "enabled": false,
+    "mode": "mention",
+    "keywords": ["ai", "bot", "help"]
+  }
+}
+```
+
+### Tools Configuration
+Tool registry and enable/disable states:
+
+```json
+{
+  "tools": {
+    "enabled": {
+      "websearch": true,
+      "ping": true,
+      "autosearch": false
+    }
+  }
+}
+```
 - rate_limits (cooldown_sec, per_user_per_min, per_channel_per_min, tools_per_user_per_min, tools_per_guild_per_min, tool_cooldowns: {tool: seconds})
 - usage: aggregates and rollups
   - chat_count, last_used

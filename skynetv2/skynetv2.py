@@ -2130,6 +2130,147 @@ class SkynetV2(ToolsMixin, MemoryMixin, StatsMixin, ListenerMixin, Orchestration
         
         await ctx.send(embed=embed)
 
+    @ai_group.command(name="test_memory")
+    @commands.bot_has_permissions(send_messages=True)
+    async def ai_test_memory(self, ctx: commands.Context):
+        """Test memory functionality across all interaction modes."""
+        guild = ctx.guild
+        channel = ctx.channel
+        author = ctx.author
+        
+        embed = discord.Embed(
+            title="🧠 Memory System Test", 
+            description="Testing memory functionality across all SkynetV2 interaction modes",
+            color=0x3b82f6
+        )
+        
+        try:
+            # Test 1: Check memory configuration
+            memory_config = await self.config.guild(guild).memory()
+            limit = await self._memory_get_limit(guild, channel.id)
+            stored_messages = await self._memory_get_messages(guild, channel.id)
+            
+            embed.add_field(
+                name="📋 Memory Configuration", 
+                value=f"**Current Limit:** {limit} conversation pairs\n**Stored Messages:** {len(stored_messages)} messages\n**Default Limit:** {memory_config.get('default_limit', 10)}",
+                inline=False
+            )
+            
+            # Test 2: Build system prompt
+            system_prompt = await self._build_system_prompt(guild, author, channel)
+            prompt_preview = system_prompt[:200] + "..." if len(system_prompt) > 200 else system_prompt
+            
+            embed.add_field(
+                name="🤖 System Prompt Generation",
+                value=f"**Status:** ✅ Generated ({len(system_prompt)} characters)\n**Preview:** {prompt_preview}",
+                inline=False
+            )
+            
+            # Test 3: Build conversation context
+            context_messages = await self._memory_build_context(guild, channel.id, author)
+            system_msgs = [m for m in context_messages if m.role == "system"]
+            user_msgs = [m for m in context_messages if m.role == "user"] 
+            assistant_msgs = [m for m in context_messages if m.role == "assistant"]
+            
+            embed.add_field(
+                name="💭 Conversation Context",
+                value=f"**Total Messages:** {len(context_messages)}\n**System:** {len(system_msgs)}\n**User:** {len(user_msgs)}\n**Assistant:** {len(assistant_msgs)}",
+                inline=True
+            )
+            
+            # Test 4: Memory interaction modes
+            modes_status = []
+            
+            # Check passive listening modes
+            listening_config = await self.config.guild(guild).listening()
+            channel_listening = await self.config.guild(guild).channel_listening()
+            channel_id = str(channel.id)
+            
+            if channel_id in channel_listening:
+                effective_config = channel_listening[channel_id]
+                config_source = "channel-specific"
+            else:
+                effective_config = listening_config
+                config_source = "global"
+                
+            enabled = effective_config.get('enabled', False)
+            mode = effective_config.get('mode', 'mention')
+            
+            modes_status.append(f"**Passive Listening:** {'✅' if enabled else '❌'} ({mode} mode, {config_source})")
+            modes_status.append(f"**Command Chat:** ✅ Always uses memory")
+            modes_status.append(f"**Slash Chat:** ✅ Always uses memory")
+            modes_status.append(f"**Streaming Chat:** ✅ Always uses memory")
+            
+            embed.add_field(
+                name="🎯 Interaction Modes",
+                value="\n".join(modes_status),
+                inline=False
+            )
+            
+            # Test 5: Recent memory entries preview
+            if stored_messages:
+                recent_preview = []
+                for msg in stored_messages[-4:]:  # Show last 4 messages
+                    role = msg.get('role', 'unknown')
+                    content = msg.get('content', '')[:100]
+                    if len(msg.get('content', '')) > 100:
+                        content += "..."
+                    recent_preview.append(f"**{role.title()}:** {content}")
+                
+                embed.add_field(
+                    name="📝 Recent Memory (Preview)",
+                    value="\n".join(recent_preview) if recent_preview else "*No recent messages*",
+                    inline=False
+                )
+            else:
+                embed.add_field(
+                    name="📝 Recent Memory",
+                    value="*No messages stored yet*\nStart a conversation to see memory in action!",
+                    inline=False
+                )
+            
+            # Test 6: Memory policies
+            prune_config = memory_config.get("prune", {})
+            max_items = prune_config.get("max_items", 0)
+            max_age_days = prune_config.get("max_age_days", 0)
+            
+            policies = []
+            if max_items > 0:
+                policies.append(f"Max items: {max_items}")
+            if max_age_days > 0:
+                policies.append(f"Max age: {max_age_days} days")
+            if not policies:
+                policies.append("No pruning policies set")
+                
+            embed.add_field(
+                name="🗂️ Memory Policies",
+                value=" • ".join(policies),
+                inline=False
+            )
+            
+            # Test 7: Memory test instructions
+            embed.add_field(
+                name="🧪 Test Instructions",
+                value=f"1. Use `{ctx.prefix}ai chat` command to test command memory\n"
+                      f"2. Use `/ai chat` slash command to test slash memory\n"
+                      f"3. Mention the bot to test passive mention memory\n"
+                      f"4. Use keywords (if configured) to test keyword memory\n"
+                      f"5. Set channel to 'all' mode to test all-message memory\n"
+                      f"6. Check `{ctx.prefix}ai memory show` to verify storage",
+                inline=False
+            )
+            
+            embed.set_footer(text="💡 All interaction modes now use conversation memory consistently")
+            
+        except Exception as e:
+            embed.add_field(
+                name="❌ Test Error",
+                value=f"Memory test failed: {str(e)}",
+                inline=False
+            )
+        
+        await ctx.send(embed=embed)
+
     @ai_group.command(name="test_listener")
     @commands.bot_has_permissions(send_messages=True)
     async def ai_test_listener(self, ctx: commands.Context):

@@ -119,22 +119,11 @@ class ListenerMixin:
             if mode == "mention" and self.bot.user:
                 processed_content = ConversationManager.extract_mention_content(message, self.bot.user)
             
-            # Determine if we should include conversation context
-            include_context = ConversationManager.should_include_context(message, mode)
-            
-            if include_context:
-                # Use conversation memory for context-aware responses
-                print(f"[SkynetV2 Listener] Building conversation context...")
-                messages = await self._memory_build_context(guild, message.channel.id, message.author)
-                # Add current message to context
-                messages.append(ChatMessage("user", processed_content or "Hello"))
-            else:
-                # Simple single-message context for "all" mode
-                system_prompt = await self._build_system_prompt(guild, message.author, message.channel)
-                messages = [
-                    ChatMessage("system", system_prompt),
-                    ChatMessage("user", processed_content or "Hello")
-                ]
+            # Always use conversation memory for consistent behavior across all modes
+            print(f"[SkynetV2 Listener] Building conversation context with memory...")
+            messages = await self._memory_build_context(guild, message.channel.id, message.author)
+            # Add current message to context
+            messages.append(ChatMessage("user", processed_content or "Hello"))
             
             # Send to AI provider
             chunks = []
@@ -162,10 +151,9 @@ class ListenerMixin:
                     u["tokens_total"] = int(u.get("tokens_total", 0)) + int(last_usage.get("total", 0))
                     c["tokens_total"] = int(c.get("tokens_total", 0)) + int(last_usage.get("total", 0))
             
-            # Store conversation in memory (if using context)
-            if include_context:
-                print(f"[SkynetV2 Listener] Storing conversation in memory...")
-                await self._memory_remember(guild, message.channel.id, processed_content or "Hello", text)
+            # Store conversation in memory (always, for all modes)
+            print(f"[SkynetV2 Listener] Storing conversation in memory...")
+            await self._memory_remember(guild, message.channel.id, processed_content or "Hello", text)
             
             # Send response using smart message handling
             print(f"[SkynetV2 Listener] Sending response with smart chunking: {len(text)} characters...")

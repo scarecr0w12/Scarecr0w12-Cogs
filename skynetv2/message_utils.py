@@ -171,15 +171,9 @@ class ConversationManager:
         """
         Determine if we should include conversation context based on the trigger type.
         
-        For mentions and direct interactions, include more context.
-        For keyword/all modes, use less context to avoid noise.
+        Memory is now always included for all modes to maintain conversation continuity.
         """
-        if listening_mode == "mention":
-            return True  # Always include context for mentions
-        elif listening_mode == "keyword":
-            return True  # Include context for keyword triggers
-        elif listening_mode == "all":
-            return False  # Don't include context for all-message mode to avoid overwhelming
+        # Always include context for all modes to ensure consistent memory behavior
         return True
     
     @staticmethod

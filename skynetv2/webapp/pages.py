@@ -1222,7 +1222,13 @@ async def handle_toggle(request: web.Request):
     if resp: return web.json_response({'success': False, 'error': 'Not logged in'})
     
     try:
-        gid = int(request.match_info['guild_id'])
+        raw_guild_id = request.match_info['guild_id']
+        print(f"SkynetV2 Web: Raw guild_id from URL: '{raw_guild_id}' (type: {type(raw_guild_id)})")
+        print(f"SkynetV2 Web: Full URL path: {request.path}")
+        print(f"SkynetV2 Web: Match info: {dict(request.match_info)}")
+        
+        gid = int(raw_guild_id)
+        print(f"SkynetV2 Web: Parsed guild ID: {gid}")
         print(f"SkynetV2 Web: Toggle request for guild {gid}")
         
         # Debug the webiface and bot references
@@ -2470,6 +2476,32 @@ async def debug_bot_status(request: web.Request):
 # Add API endpoints for form submissions
     app.router.add_get('/api/debug/bot', debug_bot_status)
     app.router.add_post('/api/guild/{guild_id}/toggle', handle_toggle)
+    
+    # Debug endpoint to test URL parsing
+    async def debug_guild_id(request: web.Request):
+        """Debug endpoint to test guild ID parsing from URL"""
+        try:
+            raw_guild_id = request.match_info['guild_id']
+            parsed_gid = int(raw_guild_id)
+            
+            webiface = request.app['webiface']
+            guild = webiface.cog.bot.get_guild(parsed_gid)
+            
+            debug_info = {
+                'raw_guild_id': raw_guild_id,
+                'parsed_guild_id': parsed_gid,
+                'url_path': request.path,
+                'match_info': dict(request.match_info),
+                'guild_found': guild is not None,
+                'guild_name': guild.name if guild else None,
+                'bot_guilds': [(g.id, g.name) for g in webiface.cog.bot.guilds]
+            }
+            
+            return web.json_response(debug_info)
+        except Exception as e:
+            return web.json_response({'error': str(e)})
+    
+    app.router.add_get('/api/guild/{guild_id}/debug', debug_guild_id)
     app.router.add_post('/api/guild/{guild_id}/config/providers', handle_providers_config)
     app.router.add_post('/api/guild/{guild_id}/config/model', handle_model_config)
     app.router.add_post('/api/guild/{guild_id}/config/params', handle_params_config)

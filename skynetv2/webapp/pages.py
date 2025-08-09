@@ -605,7 +605,7 @@ async def guild_config(request: web.Request):
             </div>
             <div class='form-group'>
                 <label for='smart_replies_sensitivity'>Sensitivity (1=very responsive, 5=very conservative):</label>
-                <input type='range' id='smart_replies_sensitivity' name='sensitivity' min='1' max='5' value='{smart_replies_cfg.get("sensitivity", 3)}' />
+                <input type='range' id='smart_replies_sensitivity' name='sensitivity' min='1' max='5' value='{smart_replies_cfg.get("sensitivity", 3)}' oninput='updateSensitivityDisplay(this, "sensitivity-value")' />
                 <span id='sensitivity-value'>{smart_replies_cfg.get("sensitivity", 3)}</span>
             </div>
             <div class='form-group'>
@@ -629,7 +629,7 @@ async def guild_config(request: web.Request):
             </div>
             <div class='form-group'>
                 <label for='aws_sensitivity'>Sensitivity (1=very aggressive, 5=very conservative):</label>
-                <input type='range' id='aws_sensitivity' name='sensitivity' min='1' max='5' value='{auto_web_search_cfg.get("sensitivity", 3)}' />
+                <input type='range' id='aws_sensitivity' name='sensitivity' min='1' max='5' value='{auto_web_search_cfg.get("sensitivity", 3)}' oninput='updateSensitivityDisplay(this, "aws-sensitivity-value")' />
                 <span id='aws-sensitivity-value'>{auto_web_search_cfg.get("sensitivity", 3)}</span>
             </div>
             <div class='form-group'>
@@ -1576,6 +1576,106 @@ async def handle_listening_config(request: web.Request):
     except Exception as e:
         return web.json_response({'success': False, 'error': str(e)})
 
+async def handle_smart_replies_config(request: web.Request):
+    """Handle smart replies configuration"""
+    webiface = request.app['webiface']
+    user, resp = await _require_session(request)
+    if resp: return web.json_response({'success': False, 'error': 'Not logged in'})
+    
+    try:
+        gid = int(request.match_info['guild_id'])
+        guild = webiface.cog.bot.get_guild(gid)
+        if not guild:
+            return web.json_response({'success': False, 'error': 'Guild not found'})
+        
+        config = webiface.cog.config.guild(guild)
+        
+        # Check permissions
+        permissions = user.get('permissions', {}) if user else {}
+        is_admin = str(gid) in permissions.get('guild_admin', []) or permissions.get('bot_owner', False)
+        if not is_admin:
+            return web.json_response({'success': False, 'error': 'Admin access required'})
+        
+        data = await request.json()
+        
+        # Validate input data
+        enabled = bool(data.get('enabled', False))
+        sensitivity = int(data.get('sensitivity', 3))
+        quiet_time_seconds = int(data.get('quiet_time_seconds', 300))
+        
+        # Validate ranges
+        if not (1 <= sensitivity <= 5):
+            return web.json_response({'success': False, 'error': 'Sensitivity must be between 1 and 5'})
+        if not (10 <= quiet_time_seconds <= 3600):
+            return web.json_response({'success': False, 'error': 'Quiet time must be between 10 and 3600 seconds'})
+        
+        async with config.smart_replies() as smart_replies:
+            smart_replies['enabled'] = enabled
+            smart_replies['sensitivity'] = sensitivity
+            smart_replies['quiet_time_seconds'] = quiet_time_seconds
+        
+        return web.json_response({'success': True})
+    except ValueError as e:
+        return web.json_response({'success': False, 'error': f'Invalid input: {str(e)}'})
+    except Exception as e:
+        return web.json_response({'success': False, 'error': str(e)})
+
+async def handle_auto_web_search_config(request: web.Request):
+    """Handle auto web search configuration"""
+    webiface = request.app['webiface']
+    user, resp = await _require_session(request)
+    if resp: return web.json_response({'success': False, 'error': 'Not logged in'})
+    
+    try:
+        gid = int(request.match_info['guild_id'])
+        guild = webiface.cog.bot.get_guild(gid)
+        if not guild:
+            return web.json_response({'success': False, 'error': 'Guild not found'})
+        
+        config = webiface.cog.config.guild(guild)
+        
+        # Check permissions
+        permissions = user.get('permissions', {}) if user else {}
+        is_admin = str(gid) in permissions.get('guild_admin', []) or permissions.get('bot_owner', False)
+        if not is_admin:
+            return web.json_response({'success': False, 'error': 'Admin access required'})
+        
+        data = await request.json()
+        
+        # Validate input data
+        enabled = bool(data.get('enabled', False))
+        sensitivity = int(data.get('sensitivity', 3))
+        max_results = int(data.get('max_results', 5))
+        timeout_seconds = int(data.get('timeout_seconds', 15))
+        cooldown_seconds = int(data.get('cooldown_seconds', 60))
+        min_message_length = int(data.get('min_message_length', 10))
+        
+        # Validate ranges
+        if not (1 <= sensitivity <= 5):
+            return web.json_response({'success': False, 'error': 'Sensitivity must be between 1 and 5'})
+        if not (1 <= max_results <= 10):
+            return web.json_response({'success': False, 'error': 'Max results must be between 1 and 10'})
+        if not (5 <= timeout_seconds <= 60):
+            return web.json_response({'success': False, 'error': 'Timeout must be between 5 and 60 seconds'})
+        if not (10 <= cooldown_seconds <= 300):
+            return web.json_response({'success': False, 'error': 'Cooldown must be between 10 and 300 seconds'})
+        if not (5 <= min_message_length <= 50):
+            return web.json_response({'success': False, 'error': 'Min message length must be between 5 and 50'})
+        
+        async with config.auto_web_search() as auto_web_search:
+            auto_web_search['enabled'] = enabled
+            auto_web_search['sensitivity'] = sensitivity
+            auto_web_search['max_results'] = max_results
+            auto_web_search['timeout_seconds'] = timeout_seconds
+            auto_web_search['cooldown_seconds'] = cooldown_seconds
+            auto_web_search['min_message_length'] = min_message_length
+        
+        return web.json_response({'success': True})
+    except ValueError as e:
+        return web.json_response({'success': False, 'error': f'Invalid input: {str(e)}'})
+    except Exception as e:
+        return web.json_response({'success': False, 'error': str(e)})
+
 async def handle_channel_config(request: web.Request):
     """Handle per-channel listening configuration"""
     webiface = request.app['webiface']
@@ -1954,6 +2054,10 @@ def _html_base(title: str, body: str, current_page: str = '') -> str:
         document.body.appendChild(alert);
         
         setTimeout(() => alert.remove(), 5000);
+    }}
+    
+    function updateSensitivityDisplay(slider, displayId) {{
+        document.getElementById(displayId).textContent = slider.value;
     }}
     
     function switchTab(tabName) {{
@@ -2560,6 +2664,8 @@ def setup(webiface):
     app.router.add_post('/api/guild/{guild_id}/config/params', handle_params_config)
     app.router.add_post('/api/guild/{guild_id}/config/rate_limits', handle_rate_limits_config)
     app.router.add_post('/api/guild/{guild_id}/config/listening', handle_listening_config)
+    app.router.add_post('/api/guild/{guild_id}/config/smart_replies', handle_smart_replies_config)
+    app.router.add_post('/api/guild/{guild_id}/config/auto_web_search', handle_auto_web_search_config)
     app.router.add_post('/api/guild/{guild_id}/channel/{channel_id}/config', handle_channel_config)
     app.router.add_post('/api/guild/{guild_id}/channel/{channel_id}/reset', handle_channel_reset)
     app.router.add_post('/api/guild/{guild_id}/prompts/guild', handle_guild_prompt)

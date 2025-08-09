@@ -3,6 +3,7 @@ from __future__ import annotations
 from aiohttp import web
 from aiohttp_session import get_session
 from typing import Any, Dict
+import json
 
 def _user_access_guild(user, gid: int) -> bool:
     """Check if user has access to guild"""
@@ -708,7 +709,7 @@ async def guild_channels(request: web.Request):
     return web.Response(text=_html_base('Channel Configuration', body), content_type='text/html')
 
 async def guild_prompts(request: web.Request):
-    """Prompts management page"""
+    """Prompts management page with generator"""
     webiface = request.app['webiface']
     user, resp = await _require_session(request)
     if resp: return resp
@@ -736,70 +737,378 @@ async def guild_prompts(request: web.Request):
     guild_prompt = system_prompts.get('guild', '')
     member_prompts = system_prompts.get('members', {})
     
-    # Build member prompt forms
-    member_forms = []
-    for member in guild.members:
-        if member.bot:
-            continue
-        member_id = str(member.id)
-        member_prompt = member_prompts.get(member_id, '')
+    # Build member search and management interface
+    body = f"""
+    <div class="container">
+        <div class="breadcrumb">
+            <a href="/guild/{gid}">Guild Dashboard</a>
+            <span class="breadcrumb-separator">></span>
+            <span>Prompt Management</span>
+        </div>
         
-        member_form = f"""
-        <div class='card'>
-            <h4>{member.display_name} (@{member.name})</h4>
-            <form id='member-{member.id}-form' action='/api/guild/{gid}/prompts/member/{member.id}' method='POST'>
-                <div class='form-group'>
-                    <label>Personal Prompt:</label>
-                    <textarea name='prompt' placeholder='Special instructions for this user...'>{member_prompt}</textarea>
-                    <small>This prompt is added to all conversations with this user</small>
+        <h1>AI Prompt Management - {guild.name}</h1>
+        
+        <!-- Prompt Generator -->
+        <div class="card">
+            <div class="card-header">
+                <h2>🤖 AI Prompt Generator</h2>
+            </div>
+            <div class="card-body">
+                <div class="alert alert-info">
+                    <strong>Smart Prompt Creation:</strong> Describe what you want your AI to do and let our generator create optimized prompts.
                 </div>
-                <div class='form-group'>
-                    <button type='submit'>Update User Prompt</button>
-                    <button type='button' onclick='clearMemberPrompt({member.id})'>Clear</button>
+                
+                <div class="form-group">
+                    <label for="prompt-purpose">What should the AI do?</label>
+                    <select id="prompt-purpose" onchange="updatePromptTemplate()">
+                        <option value="">Select a purpose...</option>
+                        <option value="helpful_assistant">General Helpful Assistant</option>
+                        <option value="technical_support">Technical Support</option>
+                        <option value="creative_writing">Creative Writing Helper</option>
+                        <option value="educational">Educational Tutor</option>
+                        <option value="gaming_companion">Gaming Companion</option>
+                        <option value="roleplay_character">Roleplay Character</option>
+                        <option value="professional_assistant">Professional Assistant</option>
+                        <option value="custom">Custom (describe below)</option>
+                    </select>
+                </div>
+                
+                <div class="form-group">
+                    <label for="prompt-description">Describe your requirements:</label>
+                    <textarea id="prompt-description" rows="3" placeholder="Example: I want the AI to be friendly, knowledgeable about programming, and help users debug code issues. It should ask clarifying questions and provide step-by-step solutions."></textarea>
+                </div>
+                
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="prompt-tone">Tone:</label>
+                        <select id="prompt-tone">
+                            <option value="professional">Professional</option>
+                            <option value="friendly">Friendly</option>
+                            <option value="casual">Casual</option>
+                            <option value="formal">Formal</option>
+                            <option value="humorous">Humorous</option>
+                            <option value="encouraging">Encouraging</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="prompt-expertise">Expertise Level:</label>
+                        <select id="prompt-expertise">
+                            <option value="beginner">Beginner-friendly</option>
+                            <option value="intermediate">Intermediate</option>
+                            <option value="advanced">Advanced</option>
+                            <option value="expert">Expert</option>
+                        </select>
+                    </div>
+                </div>
+                
+                <div class="form-group">
+                    <button onclick="generatePrompt()" class="btn-success">✨ Generate Prompt</button>
+                    <div id="prompt-loading" class="loading" style="display:none;"></div>
+                </div>
+                
+                <div id="generated-prompt" style="display:none;">
+                    <label for="generated-text">Generated Prompt:</label>
+                    <textarea id="generated-text" rows="6" readonly></textarea>
+                    <div style="margin-top: 1rem;">
+                        <button onclick="useAsGuildPrompt()" class="btn-success">Use as Guild Prompt</button>
+                        <button onclick="copyToClipboard()" class="btn-outline">Copy to Clipboard</button>
+                        <button onclick="regeneratePrompt()" class="btn-secondary">🔄 Regenerate</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- System Prompt Hierarchy -->
+        <div class="card">
+            <div class="card-header">
+                <h2>📋 Current Prompt Hierarchy</h2>
+            </div>
+            <div class="card-body">
+                <div class="alert alert-info">
+                    <strong>Prompt Order:</strong> Global System → Guild → Member (each layer adds to the previous)
+                </div>
+                
+                <div class="form-group">
+                    <label><strong>Global System Prompt:</strong></label>
+                    <div style='background: #f8f9fa; padding: 12px; border-radius: 4px; font-family: monospace; white-space: pre-wrap; font-size: 0.9em; max-height: 150px; overflow-y: auto;'>{global_prompts.get('system', 'You are a helpful AI assistant.')}</div>
+                    <small>Global prompts can only be managed by bot owners</small>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Guild Prompt -->
+        <div class="card">
+            <div class="card-header">
+                <h2>🏰 Guild-Level Prompt</h2>
+            </div>
+            <div class="card-body">
+                <form id='guild-prompt-form' action='/api/guild/{gid}/prompts/guild' method='POST'>
+                    <div class='form-group'>
+                        <label>Guild-Specific Instructions:</label>
+                        <textarea name='prompt' placeholder='Instructions specific to this server...' rows='4'>{guild_prompt}</textarea>
+                        <small>This prompt is added to all conversations in this server</small>
+                    </div>
+                    <div class='form-group'>
+                        <button type='submit'>💾 Update Guild Prompt</button>
+                        <button type='button' onclick='clearGuildPrompt()' class="btn-danger">🗑️ Clear</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+        
+        <!-- Member Prompt Management -->
+        <div class="card">
+            <div class="card-header">
+                <h2>👥 Member-Specific Prompts</h2>
+            </div>
+            <div class="card-body">
+                <div class="alert alert-info">
+                    <strong>Search & Add:</strong> Find members to create personalized AI instructions for individual users.
+                </div>
+                
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="member-search-input">Search Members:</label>
+                        <input type="text" id="member-search-input" placeholder="Start typing member name..." 
+                               oninput="searchMembers()" autocomplete="off">
+                        <div id="member-search-results" class="dropdown-content" style="position:relative;"></div>
+                    </div>
+                </div>
+                
+                <div id="current-member-prompts">
+                    <h3>Current Member Prompts ({len(member_prompts)})</h3>"""
+
+    # Show existing member prompts
+    if member_prompts:
+        body += """<div class="grid grid-cols-2" style="margin-top: 1rem;">"""
+        for member_id, prompt in member_prompts.items():
+            member = guild.get_member(int(member_id))
+            if member:
+                body += f"""
+                    <div class="card" style="margin: 0.5rem 0;">
+                        <div class="card-header">
+                            <h4>{member.display_name} (@{member.name})</h4>
+                        </div>
+                        <div class="card-body">
+                            <div style="background: #f8f9fa; padding: 8px; border-radius: 4px; font-size: 0.9em; margin-bottom: 1rem; max-height: 100px; overflow-y: auto;">
+                                {prompt[:200]}{'...' if len(prompt) > 200 else ''}
+                            </div>
+                            <button onclick="editMemberPrompt('{member_id}', '{member.display_name}')" class="btn-outline btn-sm">✏️ Edit</button>
+                            <button onclick="deleteMemberPrompt('{member_id}', '{member.display_name}')" class="btn-danger btn-sm">🗑️ Delete</button>
+                        </div>
+                    </div>
+                """
+        body += """</div>"""
+    else:
+        body += """<p><em>No member-specific prompts configured yet.</em></p>"""
+
+    body += f"""
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Member Prompt Modal -->
+    <div id="member-prompt-modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:1000;">
+        <div style="position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); background:white; padding:2rem; border-radius:8px; width:90%; max-width:600px;">
+            <h3 id="modal-title">Edit Member Prompt</h3>
+            <form id="member-prompt-form">
+                <input type="hidden" id="modal-member-id">
+                <div class="form-group">
+                    <label for="modal-prompt">Prompt for <span id="modal-member-name"></span>:</label>
+                    <textarea id="modal-prompt" rows="6" placeholder="Special instructions for this user..."></textarea>
+                    <small>This prompt is added to all conversations with this specific user</small>
+                </div>
+                <div class="form-group">
+                    <button type="submit" class="btn-success">💾 Save Prompt</button>
+                    <button type="button" onclick="closeModal()" class="btn-secondary">❌ Cancel</button>
                 </div>
             </form>
         </div>
-        """
-        member_forms.append(member_form)
-    
-    body = f"""
-    <h1>Prompt Management - {guild.name}</h1>
-    <p><a href='/guild/{gid}'>← Back to Guild Page</a> | <a href='/guild/{gid}/config'>Guild Settings</a></p>
-    
-    <div class='card'>
-        <h2>System Prompt Hierarchy</h2>
-        <p>Prompts are layered in this order: <strong>Global System</strong> → <strong>Guild</strong> → <strong>Member</strong></p>
-        <p><strong>Global System Prompt:</strong></p>
-        <div style='background: #f8f9fa; padding: 12px; border-radius: 4px; font-family: monospace; white-space: pre-wrap;'>{global_prompts.get('system', 'You are a helpful AI assistant.')}</div>
-        <small>Global prompts can only be managed by bot owners</small>
-    </div>
-    
-    <div class='card'>
-        <h2>Guild Prompt</h2>
-        <form id='guild-prompt-form' action='/api/guild/{gid}/prompts/guild' method='POST'>
-            <div class='form-group'>
-                <label>Guild-Level Prompt:</label>
-                <textarea name='prompt' placeholder='Instructions specific to this server...' rows='4'>{guild_prompt}</textarea>
-                <small>This prompt is added to all conversations in this server</small>
-            </div>
-            <div class='form-group'>
-                <button type='submit'>Update Guild Prompt</button>
-                <button type='button' onclick='clearGuildPrompt()'>Clear</button>
-            </div>
-        </form>
-    </div>
-    
-    <h2>Member-Specific Prompts</h2>
-    <div class='card'>
-        <p>Configure personalized prompts for individual members. These are added to conversations with specific users.</p>
-        <input type='text' id='member-search' placeholder='Search members...' onkeyup='filterMembers()'>
-    </div>
-    
-    <div id='member-prompts-container'>
-        {''.join(member_forms)}
     </div>
     
     <script>
+    let searchTimeout;
+    let memberCache = new Map();
+    
+    // Prompt templates
+    const promptTemplates = {{
+        'helpful_assistant': 'You are a helpful, knowledgeable AI assistant. You provide clear, accurate information and are eager to help users with their questions and tasks.',
+        'technical_support': 'You are a technical support specialist. You help users troubleshoot problems by asking clarifying questions, providing step-by-step solutions, and explaining technical concepts in simple terms.',
+        'creative_writing': 'You are a creative writing assistant. You help users brainstorm ideas, develop characters, improve their writing style, and overcome writer\'s block with inspiring suggestions.',
+        'educational': 'You are an educational tutor. You break down complex topics into understandable parts, use examples and analogies, and adapt your teaching style to the learner\'s level.',
+        'gaming_companion': 'You are a gaming companion and guide. You help with game strategies, provide tips and tricks, discuss game lore, and enhance the gaming experience.',
+        'roleplay_character': 'You are a roleplay character. You stay in character, respond appropriately to the scenario, and help create engaging roleplay experiences.',
+        'professional_assistant': 'You are a professional business assistant. You help with work-related tasks, provide formal communication, and maintain a professional demeanor.'
+    }};
+    
+    function updatePromptTemplate() {{
+        const purpose = document.getElementById('prompt-purpose').value;
+        const description = document.getElementById('prompt-description');
+        if (purpose && purpose !== 'custom' && promptTemplates[purpose]) {{
+            description.value = promptTemplates[purpose];
+        }}
+    }}
+    
+    function generatePrompt() {{
+        const purpose = document.getElementById('prompt-purpose').value;
+        const description = document.getElementById('prompt-description').value;
+        const tone = document.getElementById('prompt-tone').value;
+        const expertise = document.getElementById('prompt-expertise').value;
+        
+        if (!purpose || !description) {{
+            alert('Please select a purpose and provide a description.');
+            return;
+        }}
+        
+        document.getElementById('prompt-loading').style.display = 'inline-block';
+        
+        // Generate enhanced prompt
+        let generatedPrompt = '';
+        
+        // Base prompt from template or description
+        if (purpose !== 'custom' && promptTemplates[purpose]) {{
+            generatedPrompt = promptTemplates[purpose];
+        }} else {{
+            generatedPrompt = description;
+        }}
+        
+        // Add tone adjustments
+        const toneAdjustments = {{
+            'professional': ' Maintain a professional tone and use formal language.',
+            'friendly': ' Be warm, approachable, and conversational in your responses.',
+            'casual': ' Keep things relaxed and use casual, everyday language.',
+            'formal': ' Use formal language and maintain proper etiquette at all times.',
+            'humorous': ' Add light humor when appropriate and keep interactions enjoyable.',
+            'encouraging': ' Be supportive, motivating, and positive in all interactions.'
+        }};
+        
+        generatedPrompt += toneAdjustments[tone] || '';
+        
+        // Add expertise level adjustments
+        const expertiseAdjustments = {{
+            'beginner': ' Explain concepts simply, avoid jargon, and provide additional context for technical terms.',
+            'intermediate': ' Assume some background knowledge but still explain complex concepts clearly.',
+            'advanced': ' You can use technical language and assume strong foundational knowledge.',
+            'expert': ' Engage at a highly technical level with detailed, expert-level discussion.'
+        }};
+        
+        generatedPrompt += expertiseAdjustments[expertise] || '';
+        
+        // Add custom description if provided and different from template
+        if (purpose === 'custom' || (description && description !== promptTemplates[purpose])) {{
+            generatedPrompt += '\\n\\nAdditional requirements: ' + description;
+        }}
+        
+        // Add server-specific context
+        generatedPrompt += '\\n\\nYou are operating in the "{guild.name}" Discord server. Be mindful of the server\'s community and culture.';
+        
+        setTimeout(() => {{
+            document.getElementById('generated-text').value = generatedPrompt;
+            document.getElementById('generated-prompt').style.display = 'block';
+            document.getElementById('prompt-loading').style.display = 'none';
+        }}, 1000); // Simulate generation time
+    }}
+    
+    function regeneratePrompt() {{
+        generatePrompt();
+    }}
+    
+    function useAsGuildPrompt() {{
+        const generatedText = document.getElementById('generated-text').value;
+        document.querySelector('#guild-prompt-form textarea[name="prompt"]').value = generatedText;
+        alert('✅ Generated prompt moved to Guild Prompt field. Click "Update Guild Prompt" to save.');
+        document.getElementById('guild-prompt-form').scrollIntoView({{ behavior: 'smooth' }});
+    }}
+    
+    function copyToClipboard() {{
+        const generatedText = document.getElementById('generated-text');
+        generatedText.select();
+        document.execCommand('copy');
+        alert('✅ Prompt copied to clipboard!');
+    }}
+    
+    function searchMembers() {{
+        const query = document.getElementById('member-search-input').value.trim();
+        const resultsDiv = document.getElementById('member-search-results');
+        
+        if (query.length < 2) {{
+            resultsDiv.innerHTML = '';
+            resultsDiv.style.display = 'none';
+            return;
+        }}
+        
+        clearTimeout(searchTimeout);
+        searchTimeout = setTimeout(async () => {{
+            try {{
+                const response = await fetch(`/api/guild/{gid}/members/search?q=${{encodeURIComponent(query)}}`);
+                const data = await response.json();
+                
+                if (data.success) {{
+                    displaySearchResults(data.members);
+                }} else {{
+                    resultsDiv.innerHTML = '<div class="dropdown-item">Error searching members</div>';
+                    resultsDiv.style.display = 'block';
+                }}
+            }} catch (e) {{
+                resultsDiv.innerHTML = '<div class="dropdown-item">Search failed</div>';
+                resultsDiv.style.display = 'block';
+            }}
+        }}, 300);
+    }}
+    
+    function displaySearchResults(members) {{
+        const resultsDiv = document.getElementById('member-search-results');
+        
+        if (members.length === 0) {{
+            resultsDiv.innerHTML = '<div class="dropdown-item">No members found</div>';
+        }} else {{
+            resultsDiv.innerHTML = members.map(member => 
+                `<div class="dropdown-item" onclick="selectMember('${{member.id}}', '${{member.display_name}}', '${{member.name}}')">
+                    ${{member.display_name}} (@${{member.name}})
+                </div>`
+            ).join('');
+        }}
+        resultsDiv.style.display = 'block';
+    }}
+    
+    function selectMember(memberId, displayName, username) {{
+        document.getElementById('member-search-results').style.display = 'none';
+        document.getElementById('member-search-input').value = '';
+        editMemberPrompt(memberId, displayName);
+    }}
+    
+    function editMemberPrompt(memberId, displayName) {{
+        document.getElementById('modal-member-id').value = memberId;
+        document.getElementById('modal-member-name').textContent = displayName;
+        document.getElementById('modal-title').textContent = `Edit Prompt for ${{displayName}}`;
+        
+        // Load existing prompt if any
+        const existingPrompts = {json.dumps(member_prompts)};
+        document.getElementById('modal-prompt').value = existingPrompts[memberId] || '';
+        
+        document.getElementById('member-prompt-modal').style.display = 'block';
+    }}
+    
+    function deleteMemberPrompt(memberId, displayName) {{
+        if (confirm(`Delete prompt for ${{displayName}}?`)) {{
+            fetch(`/api/guild/{gid}/prompts/member/${{memberId}}`, {{
+                method: 'POST',
+                headers: {{'Content-Type': 'application/json'}},
+                body: JSON.stringify({{prompt: ''}})
+            }})
+            .then(r => r.json())
+            .then(data => {{
+                if (data.success) location.reload();
+                else alert('Error: ' + data.error);
+            }});
+        }}
+    }}
+    
+    function closeModal() {{
+        document.getElementById('member-prompt-modal').style.display = 'none';
+    }}
+    
     function clearGuildPrompt() {{
         if (confirm('Clear guild prompt?')) {{
             fetch('/api/guild/{gid}/prompts/guild', {{
@@ -815,31 +1124,7 @@ async def guild_prompts(request: web.Request):
         }}
     }}
     
-    function clearMemberPrompt(memberId) {{
-        if (confirm('Clear member prompt?')) {{
-            fetch(`/api/guild/{gid}/prompts/member/${{memberId}}`, {{
-                method: 'POST',
-                headers: {{'Content-Type': 'application/json'}},
-                body: JSON.stringify({{prompt: ''}})
-            }})
-            .then(r => r.json())
-            .then(data => {{
-                if (data.success) location.reload();
-                else alert('Error: ' + data.error);
-            }});
-        }}
-    }}
-    
-    function filterMembers() {{
-        const search = document.getElementById('member-search').value.toLowerCase();
-        const cards = document.querySelectorAll('#member-prompts-container .card');
-        cards.forEach(card => {{
-            const name = card.querySelector('h4').textContent.toLowerCase();
-            card.style.display = name.includes(search) ? '' : 'none';
-        }});
-    }}
-    
-    // Handle form submissions
+    // Handle guild prompt form
     document.getElementById('guild-prompt-form').onsubmit = function(e) {{
         e.preventDefault();
         const formData = new FormData(this);
@@ -853,33 +1138,46 @@ async def guild_prompts(request: web.Request):
         .then(r => r.json())
         .then(data => {{
             if (data.success) {{
-                alert('Guild prompt updated!');
+                alert('✅ Guild prompt updated!');
             }} else {{
                 alert('Error: ' + data.error);
             }}
         }});
     }};
     
-    document.querySelectorAll('form[id^="member-"]').forEach(form => {{
-        form.onsubmit = function(e) {{
-            e.preventDefault();
-            const formData = new FormData(form);
-            const data = Object.fromEntries(formData);
-            
-            fetch(form.action, {{
-                method: 'POST',
-                headers: {{'Content-Type': 'application/json'}},
-                body: JSON.stringify(data)
-            }})
-            .then(r => r.json())
-            .then(data => {{
-                if (data.success) {{
-                    alert('Member prompt updated!');
-                }} else {{
-                    alert('Error: ' + data.error);
-                }}
-            }});
-        }};
+    // Handle member prompt form
+    document.getElementById('member-prompt-form').onsubmit = function(e) {{
+        e.preventDefault();
+        const memberId = document.getElementById('modal-member-id').value;
+        const prompt = document.getElementById('modal-prompt').value;
+        
+        fetch(`/api/guild/{gid}/prompts/member/${{memberId}}`, {{
+            method: 'POST',
+            headers: {{'Content-Type': 'application/json'}},
+            body: JSON.stringify({{prompt: prompt}})
+        }})
+        .then(r => r.json())
+        .then(data => {{
+            if (data.success) {{
+                alert('✅ Member prompt updated!');
+                closeModal();
+                location.reload();
+            }} else {{
+                alert('Error: ' + data.error);
+            }}
+        }});
+    }};
+    
+    // Close modal when clicking outside
+    document.getElementById('member-prompt-modal').onclick = function(e) {{
+        if (e.target === this) closeModal();
+    }};
+    
+    // Hide search results when clicking elsewhere
+    document.addEventListener('click', function(e) {{
+        if (!e.target.closest('#member-search-input') && !e.target.closest('#member-search-results')) {{
+            document.getElementById('member-search-results').style.display = 'none';
+        }}
     }});
     </script>
     """
@@ -1234,6 +1532,49 @@ async def handle_member_prompt(request: web.Request):
     except Exception as e:
         return web.json_response({'success': False, 'error': str(e)})
 
+async def handle_member_search(request: web.Request):
+    """Handle member search API"""
+    webiface = request.app['webiface']
+    user, resp = await _require_session(request)
+    if resp: return web.json_response({'success': False, 'error': 'Not logged in'})
+    
+    try:
+        gid = int(request.match_info['guild_id'])
+        query = request.query.get('q', '').strip().lower()
+        
+        if not query or len(query) < 2:
+            return web.json_response({'success': True, 'members': []})
+            
+        guild = webiface.cog.bot.get_guild(gid)
+        if not guild:
+            return web.json_response({'success': False, 'error': 'Guild not found'})
+        
+        # Check permissions
+        is_admin = str(gid) in user.get('permissions', {}).get('guild_admin', []) or user.get('permissions', {}).get('bot_owner')
+        if not is_admin:
+            return web.json_response({'success': False, 'error': 'Admin access required'})
+        
+        # Search members (limit to first 20 matches)
+        matching_members = []
+        for member in guild.members:
+            if member.bot:
+                continue
+            if (query in member.display_name.lower() or 
+                query in member.name.lower() or 
+                query in str(member.id)):
+                matching_members.append({
+                    'id': str(member.id),
+                    'name': member.name,
+                    'display_name': member.display_name,
+                    'discriminator': member.discriminator
+                })
+                if len(matching_members) >= 20:
+                    break
+        
+        return web.json_response({'success': True, 'members': matching_members})
+    except Exception as e:
+        return web.json_response({'success': False, 'error': str(e)})
+
 BASE_STYLE = """
 body{font-family:'Segoe UI',system-ui,-apple-system,sans-serif;margin:0;background:#f8fafc;color:#1e293b;line-height:1.6}
 header{background:#1e40af;color:white;padding:1rem 2rem;box-shadow:0 2px 4px rgba(0,0,0,0.1)}
@@ -1515,3 +1856,4 @@ def setup(webiface):
     app.router.add_post('/api/guild/{guild_id}/channel/{channel_id}/reset', handle_channel_reset)
     app.router.add_post('/api/guild/{guild_id}/prompts/guild', handle_guild_prompt)
     app.router.add_post('/api/guild/{guild_id}/prompts/member/{member_id}', handle_member_prompt)
+    app.router.add_get('/api/guild/{guild_id}/members/search', handle_member_search)

@@ -15,34 +15,52 @@ def _html_base(title: str, body: str) -> str:
 async def get_user_permissions(webiface: Any, user_info: Dict, user_guilds: List[Dict]) -> Dict[str, Any]:
     user_id = int(user_info['id'])
     permissions = {'bot_owner': False,'guild_admin': set(),'guild_member': set(),'guilds': set()}
-    app_info = await webiface.cog.bot.application_info()
     
-    # Check if user is bot owner (handle both individual and team ownership)
-    is_owner = False
-    if hasattr(app_info.owner, 'id') and user_id == app_info.owner.id:
-        # Individual ownership
-        is_owner = True
-        print(f"SkynetV2 Web: User is individual bot owner - user: {user_id}, bot owner: {app_info.owner.id}")
-    elif hasattr(app_info, 'team') and app_info.team:
-        # Team ownership - check if user is a team member
-        for member in app_info.team.members:
-            if user_id == member.id:
+    try:
+        app_info = await webiface.cog.bot.application_info()
+        print(f"SkynetV2 Web: Checking ownership for user {user_id}")
+        print(f"SkynetV2 Web: App info - owner: {getattr(app_info, 'owner', None)}, team: {getattr(app_info, 'team', None)}")
+        
+        # Check if user is bot owner (handle both individual and team ownership)
+        is_owner = False
+        
+        # First check individual ownership
+        if hasattr(app_info, 'owner') and app_info.owner and hasattr(app_info.owner, 'id'):
+            if user_id == app_info.owner.id:
                 is_owner = True
-                print(f"SkynetV2 Web: User is team member - user: {user_id}, team: {app_info.team.name}")
-                break
-        if not is_owner:
-            print(f"SkynetV2 Web: User not in team - user: {user_id}, team members: {[m.id for m in app_info.team.members]}")
-    else:
-        print(f"SkynetV2 Web: Bot owner check - user: {user_id}, bot owner: {getattr(app_info.owner, 'id', 'unknown')}")
+                print(f"SkynetV2 Web: ✅ User is individual bot owner - user: {user_id}, bot owner: {app_info.owner.id}")
+        
+        # Then check team ownership
+        if not is_owner and hasattr(app_info, 'team') and app_info.team:
+            print(f"SkynetV2 Web: Checking team ownership - team: {app_info.team.name} ({app_info.team.id})")
+            if hasattr(app_info.team, 'members') and app_info.team.members:
+                team_member_ids = []
+                for member in app_info.team.members:
+                    team_member_ids.append(member.id)
+                    if user_id == member.id:
+                        is_owner = True
+                        print(f"SkynetV2 Web: ✅ User is team member - user: {user_id}, role: {getattr(member, 'membership_state', 'unknown')}")
+                        break
+                if not is_owner:
+                    print(f"SkynetV2 Web: ❌ User not in team - user: {user_id}, team members: {team_member_ids}")
+            else:
+                print(f"SkynetV2 Web: Team has no members or members not accessible")
+        
+        if is_owner:
+            print("SkynetV2 Web: ✅ User confirmed as bot owner - granting full access")
+            permissions['bot_owner'] = True
+            # For bot owners, store only first 50 guilds to avoid cookie size limits
+            bot_guild_ids = [str(g.id) for g in list(webiface.cog.bot.guilds)[:50]]
+            permissions['guilds'] = set(bot_guild_ids)
+            permissions['guild_admin'] = set(bot_guild_ids)
+            return permissions
+        else:
+            print(f"SkynetV2 Web: ❌ User is not bot owner - user: {user_id}")
     
-    if is_owner:
-        print("SkynetV2 Web: User is bot owner - granting full access")
-        permissions['bot_owner'] = True
-        # For bot owners, store only first 50 guilds to avoid cookie size limits
-        bot_guild_ids = [str(g.id) for g in list(webiface.cog.bot.guilds)[:50]]
-        permissions['guilds'] = set(bot_guild_ids)
-        permissions['guild_admin'] = set(bot_guild_ids)
-        return permissions
+    except Exception as e:
+        print(f"SkynetV2 Web: Error checking bot ownership: {e}")
+        import traceback
+        traceback.print_exc()
     bot_guild_ids = {g.id for g in webiface.cog.bot.guilds}
     for guild_info in user_guilds:
         gid = guild_info['id']

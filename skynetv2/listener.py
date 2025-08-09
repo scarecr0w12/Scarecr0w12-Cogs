@@ -5,7 +5,7 @@ import discord
 from redbot.core import commands  # Import commands for the listener decorator
 from .api.base import ChatMessage
 from .logging_system import log_ai_request, log_listening_event, log_rate_limit_hit, log_error_event
-from .message_utils import MessageChunker, ConversationManager
+from .message_utils import MessageChunker, ConversationManager, SmartReplyAnalyzer
 
 print("🚀 [SkynetV2] NEW LISTENER CODE LOADED WITH CONVERSATION SYSTEM v1.2.3")
 
@@ -83,7 +83,29 @@ class ListenerMixin:
                 print(f"[SkynetV2 Listener] Keyword matched, triggered=True")
         elif mode == "all":
             triggered = True
-            print(f"[SkynetV2 Listener] Mode is 'all', triggered=True")
+            print(f"[SkynetV2 Listener] Mode is 'all', checking smart replies...")
+            
+            # Use smart replies to determine if we should actually respond
+            smart_config = await self.config.guild(guild).smart_replies()
+            
+            # Get recent messages for context analysis (last 20 messages)
+            try:
+                recent_messages = []
+                async for msg in message.channel.history(limit=20, before=message):
+                    recent_messages.insert(0, msg)  # Insert at beginning to maintain order
+            except Exception as e:
+                print(f"[SkynetV2 Listener] Warning: Could not fetch recent messages: {e}")
+                recent_messages = []
+            
+            should_respond, reason = SmartReplyAnalyzer.should_respond_in_all_mode(
+                message, recent_messages, self.bot.user, smart_config
+            )
+            
+            if not should_respond:
+                triggered = False
+                print(f"[SkynetV2 Listener] Smart reply decided NOT to respond: {reason}")
+            else:
+                print(f"[SkynetV2 Listener] Smart reply decided TO respond: {reason}")
         
         # Log the listening event
         await log_listening_event(guild, message.channel, mode, triggered, message.author)

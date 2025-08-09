@@ -180,6 +180,15 @@ Always include **practical examples** and **actionable information**.""",
         "listening": {"enabled": False, "mode": "mention", "keywords": []},
         # Per-channel listening configuration: channel_id -> {enabled: bool, mode: str, keywords: list}
         "channel_listening": {},
+        # Smart replies configuration for "all" mode - helps bot determine when to respond intelligently
+        "smart_replies": {
+            "enabled": True,
+            "sensitivity": 3,  # 1=very responsive, 5=very conservative
+            "quiet_time_seconds": 300,  # 5 minutes of inactivity before bot becomes more responsive
+            "response_keywords": ["help", "how", "what", "why", "bot", "ai", "question", "?"],
+            "ignore_short_messages": True,  # ignore messages under 10 characters in all mode
+            "require_question_or_keyword": False  # if True, only respond to questions or keyword matches
+        },
         "tools": {"enabled": {}},
         # Added pruning policy (max_items hard cap across messages list; max_age_days age trimming on write)
         "memory": {"default_limit": 10, "per_channel": {}, "prune": {"max_items": 400, "max_age_days": 30}},

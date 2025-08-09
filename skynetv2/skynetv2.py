@@ -1612,6 +1612,102 @@ class SkynetV2(ToolsMixin, MemoryMixin, StatsMixin, ListenerMixin, Orchestration
         
         await interaction.response.send_message(embed=embed)
 
+    @channel_group.command(name="smart_replies_enable", description="Enable smart replies for 'all' mode")
+    @app_commands.checks.has_permissions(manage_guild=True)
+    async def slash_channel_smart_replies_enable(self, interaction: discord.Interaction):
+        assert interaction.guild is not None
+        
+        async with self.config.guild(interaction.guild).smart_replies() as smart_replies:
+            smart_replies['enabled'] = True
+        
+        await interaction.response.send_message("✅ Smart replies enabled! The bot will now intelligently decide when to respond in 'all' mode.")
+
+    @channel_group.command(name="smart_replies_disable", description="Disable smart replies (normal 'all' mode)")
+    @app_commands.checks.has_permissions(manage_guild=True)
+    async def slash_channel_smart_replies_disable(self, interaction: discord.Interaction):
+        assert interaction.guild is not None
+        
+        async with self.config.guild(interaction.guild).smart_replies() as smart_replies:
+            smart_replies['enabled'] = False
+        
+        await interaction.response.send_message("❌ Smart replies disabled. Bot will respond to all messages in 'all' mode.")
+
+    @channel_group.command(name="smart_replies_sensitivity", description="Set smart reply sensitivity (1-5)")
+    @app_commands.describe(level="Sensitivity level: 1=very responsive, 5=very conservative")
+    @app_commands.checks.has_permissions(manage_guild=True)
+    async def slash_channel_smart_replies_sensitivity(self, interaction: discord.Interaction, level: int):
+        assert interaction.guild is not None
+        
+        if not 1 <= level <= 5:
+            await interaction.response.send_message("❌ Sensitivity level must be between 1 (very responsive) and 5 (very conservative).", ephemeral=True)
+            return
+        
+        async with self.config.guild(interaction.guild).smart_replies() as smart_replies:
+            smart_replies['sensitivity'] = level
+        
+        sensitivity_descriptions = {
+            1: "Very Responsive - responds to most messages",
+            2: "Responsive - avoids obvious human-to-human replies", 
+            3: "Balanced - good mix of helpful but not intrusive (default)",
+            4: "Conservative - only responds to clear questions/requests",
+            5: "Very Conservative - only responds when specifically indicated"
+        }
+        
+        await interaction.response.send_message(f"✅ Smart reply sensitivity set to **{level}** - {sensitivity_descriptions[level]}")
+
+    @channel_group.command(name="smart_replies_status", description="Show smart reply configuration")
+    @app_commands.checks.has_permissions(manage_guild=True)
+    async def slash_channel_smart_replies_status(self, interaction: discord.Interaction):
+        assert interaction.guild is not None
+        
+        smart_config = await self.config.guild(interaction.guild).smart_replies()
+        
+        embed = discord.Embed(
+            title="🧠 Smart Replies Configuration",
+            description="Intelligent response control for 'all' mode",
+            color=0x00FF00 if smart_config.get('enabled', True) else 0xFF0000
+        )
+        
+        embed.add_field(
+            name="📡 Status",
+            value="✅ Enabled" if smart_config.get('enabled', True) else "❌ Disabled",
+            inline=True
+        )
+        
+        sensitivity = smart_config.get('sensitivity', 3)
+        sensitivity_names = {1: "Very Responsive", 2: "Responsive", 3: "Balanced", 4: "Conservative", 5: "Very Conservative"}
+        
+        embed.add_field(
+            name="🎯 Sensitivity",
+            value=f"**{sensitivity}** - {sensitivity_names.get(sensitivity, 'Unknown')}",
+            inline=True
+        )
+        
+        embed.add_field(
+            name="⏱️ Quiet Time",
+            value=f"{smart_config.get('quiet_time_seconds', 300)} seconds",
+            inline=True
+        )
+        
+        keywords = smart_config.get('response_keywords', [])
+        embed.add_field(
+            name="🔑 Response Keywords",
+            value=", ".join(f"`{kw}`" for kw in keywords[:8]) if keywords else "*Using defaults*",
+            inline=False
+        )
+        
+        embed.add_field(
+            name="📋 How It Works",
+            value="• Avoids responding to direct replies between humans\n"
+                  "• Detects ongoing human-to-human conversations\n" 
+                  "• Responds to questions, help requests, and bot-directed content\n"
+                  "• Considers channel activity and quiet periods\n"
+                  "• Always responds when bot is mentioned",
+            inline=False
+        )
+        
+        await interaction.response.send_message(embed=embed)
+
     # ----------------
     # Agent Orchestration Commands
     # ----------------
@@ -1909,6 +2005,206 @@ class SkynetV2(ToolsMixin, MemoryMixin, StatsMixin, ListenerMixin, Orchestration
         else:
             await ctx.send(f"❌ No keywords configured for {channel.mention}")
 
+    @ai_channel.group(name="smart_replies")
+    async def ai_channel_smart_replies(self, ctx: commands.Context):
+        """Smart reply configuration for 'all' mode."""
+        if ctx.invoked_subcommand is None:
+            return
+
+    @ai_channel_smart_replies.command(name="enable")
+    async def ai_channel_smart_replies_enable(self, ctx: commands.Context):
+        """Enable smart replies for this guild."""
+        if ctx.guild is None:
+            await ctx.send(ResponseFormatter.format_error(
+                "Guild Not Found", 
+                "This command must be used within a server.",
+                "Please run this command from a channel in the server you want to configure."
+            ))
+            return
+        
+        async with self.config.guild(ctx.guild).smart_replies() as smart_replies:
+            smart_replies['enabled'] = True
+        
+        await ctx.send("✅ Smart replies enabled! The bot will now intelligently decide when to respond in 'all' mode.")
+
+    @ai_channel_smart_replies.command(name="disable")
+    async def ai_channel_smart_replies_disable(self, ctx: commands.Context):
+        """Disable smart replies for this guild (returns to normal 'all' mode behavior)."""
+        if ctx.guild is None:
+            await ctx.send(ResponseFormatter.format_error(
+                "Guild Not Found", 
+                "This command must be used within a server.",
+                "Please run this command from a channel in the server you want to configure."
+            ))
+            return
+        
+        async with self.config.guild(ctx.guild).smart_replies() as smart_replies:
+            smart_replies['enabled'] = False
+        
+        await ctx.send("❌ Smart replies disabled. Bot will respond to all messages in 'all' mode.")
+
+    @ai_channel_smart_replies.command(name="sensitivity")
+    async def ai_channel_smart_replies_sensitivity(self, ctx: commands.Context, level: int):
+        """Set smart reply sensitivity level (1=very responsive, 5=very conservative)."""
+        if ctx.guild is None:
+            await ctx.send(ResponseFormatter.format_error(
+                "Guild Not Found", 
+                "This command must be used within a server.",
+                "Please run this command from a channel in the server you want to configure."
+            ))
+            return
+        
+        if not 1 <= level <= 5:
+            await ctx.send("❌ Sensitivity level must be between 1 (very responsive) and 5 (very conservative).")
+            return
+        
+        async with self.config.guild(ctx.guild).smart_replies() as smart_replies:
+            smart_replies['sensitivity'] = level
+        
+        sensitivity_descriptions = {
+            1: "Very Responsive - responds to most messages",
+            2: "Responsive - avoids obvious human-to-human replies", 
+            3: "Balanced - good mix of helpful but not intrusive (default)",
+            4: "Conservative - only responds to clear questions/requests",
+            5: "Very Conservative - only responds when specifically indicated"
+        }
+        
+        await ctx.send(f"✅ Smart reply sensitivity set to **{level}** - {sensitivity_descriptions[level]}")
+
+    @ai_channel_smart_replies.command(name="status") 
+    async def ai_channel_smart_replies_status(self, ctx: commands.Context):
+        """Show current smart reply configuration."""
+        if ctx.guild is None:
+            await ctx.send(ResponseFormatter.format_error(
+                "Guild Not Found", 
+                "This command must be used within a server.",
+                "Please run this command from a channel in the server you want to configure."
+            ))
+            return
+        
+        smart_config = await self.config.guild(ctx.guild).smart_replies()
+        
+        embed = discord.Embed(
+            title="🧠 Smart Replies Configuration",
+            description="Intelligent response control for 'all' mode",
+            color=0x00FF00 if smart_config.get('enabled', True) else 0xFF0000
+        )
+        
+        embed.add_field(
+            name="📡 Status",
+            value="✅ Enabled" if smart_config.get('enabled', True) else "❌ Disabled",
+            inline=True
+        )
+        
+        sensitivity = smart_config.get('sensitivity', 3)
+        sensitivity_names = {1: "Very Responsive", 2: "Responsive", 3: "Balanced", 4: "Conservative", 5: "Very Conservative"}
+        
+        embed.add_field(
+            name="🎯 Sensitivity",
+            value=f"**{sensitivity}** - {sensitivity_names.get(sensitivity, 'Unknown')}",
+            inline=True
+        )
+        
+        embed.add_field(
+            name="⏱️ Quiet Time",
+            value=f"{smart_config.get('quiet_time_seconds', 300)} seconds",
+            inline=True
+        )
+        
+        keywords = smart_config.get('response_keywords', [])
+        embed.add_field(
+            name="🔑 Response Keywords",
+            value=", ".join(f"`{kw}`" for kw in keywords[:8]) if keywords else "*Using defaults*",
+            inline=False
+        )
+        
+        embed.add_field(
+            name="⚙️ Options",
+            value=f"**Ignore Short Messages:** {'✅' if smart_config.get('ignore_short_messages', True) else '❌'}\n"
+                  f"**Require Question/Keyword:** {'✅' if smart_config.get('require_question_or_keyword', False) else '❌'}",
+            inline=False
+        )
+        
+        embed.add_field(
+            name="📋 How It Works",
+            value="• Avoids responding to direct replies between humans\n"
+                  "• Detects ongoing human-to-human conversations\n" 
+                  "• Responds to questions, help requests, and bot-directed content\n"
+                  "• Considers channel activity and quiet periods\n"
+                  "• Always responds when bot is mentioned",
+            inline=False
+        )
+        
+        await ctx.send(embed=embed)
+
+    @ai_channel_smart_replies.command(name="test")
+    async def ai_channel_smart_replies_test(self, ctx: commands.Context, *, test_message: str):
+        """Test what smart replies would decide for a given message."""
+        if ctx.guild is None:
+            await ctx.send(ResponseFormatter.format_error(
+                "Guild Not Found", 
+                "This command must be used within a server.",
+                "Please run this command from a channel in the server you want to test."
+            ))
+            return
+        
+        # Import the analyzer
+        from .message_utils import SmartReplyAnalyzer
+        
+        smart_config = await self.config.guild(ctx.guild).smart_replies()
+        
+        # Create a mock message for testing
+        class MockMessage:
+            def __init__(self, content, author, channel):
+                self.content = content
+                self.author = author
+                self.channel = channel
+                self.mentions = []
+                self.reference = None
+                self.created_at = ctx.message.created_at
+        
+        mock_message = MockMessage(test_message, ctx.author, ctx.channel)
+        
+        # Get recent messages for context
+        try:
+            recent_messages = []
+            async for msg in ctx.channel.history(limit=20, before=ctx.message):
+                recent_messages.insert(0, msg)
+        except Exception:
+            recent_messages = []
+        
+        should_respond, reason = SmartReplyAnalyzer.should_respond_in_all_mode(
+            mock_message, recent_messages, self.bot.user, smart_config
+        )
+        
+        embed = discord.Embed(
+            title="🧪 Smart Reply Test Result",
+            description=f"**Test Message:** `{test_message}`",
+            color=0x00FF00 if should_respond else 0xFF0000
+        )
+        
+        embed.add_field(
+            name="🤖 Bot Decision",
+            value=f"**{'✅ WOULD RESPOND' if should_respond else '❌ WOULD NOT RESPOND'}**",
+            inline=False
+        )
+        
+        embed.add_field(
+            name="💭 Reasoning",
+            value=reason,
+            inline=False
+        )
+        
+        embed.add_field(
+            name="⚙️ Current Settings",
+            value=f"**Enabled:** {'Yes' if smart_config.get('enabled', True) else 'No'}\n"
+                  f"**Sensitivity:** {smart_config.get('sensitivity', 3)}/5\n"
+                  f"**Test Channel:** {ctx.channel.mention}",
+            inline=False
+        )
+        
+        await ctx.send(embed=embed)
+
     @ai_channel.command(name="status")
     async def ai_channel_status(self, ctx: commands.Context, channel: discord.TextChannel = None):
         """Show current channel listening configuration."""
@@ -2197,6 +2493,14 @@ class SkynetV2(ToolsMixin, MemoryMixin, StatsMixin, ListenerMixin, Orchestration
             mode = effective_config.get('mode', 'mention')
             
             modes_status.append(f"**Passive Listening:** {'✅' if enabled else '❌'} ({mode} mode, {config_source})")
+            
+            # Add smart reply info for 'all' mode
+            if mode == 'all':
+                smart_config = await self.config.guild(guild).smart_replies()
+                smart_enabled = smart_config.get('enabled', True)
+                sensitivity = smart_config.get('sensitivity', 3)
+                modes_status.append(f"**Smart Replies:** {'✅' if smart_enabled else '❌'} (sensitivity {sensitivity}/5)")
+            
             modes_status.append(f"**Command Chat:** ✅ Always uses memory")
             modes_status.append(f"**Slash Chat:** ✅ Always uses memory")
             modes_status.append(f"**Streaming Chat:** ✅ Always uses memory")
@@ -2256,11 +2560,12 @@ class SkynetV2(ToolsMixin, MemoryMixin, StatsMixin, ListenerMixin, Orchestration
                       f"3. Mention the bot to test passive mention memory\n"
                       f"4. Use keywords (if configured) to test keyword memory\n"
                       f"5. Set channel to 'all' mode to test all-message memory\n"
-                      f"6. Check `{ctx.prefix}ai memory show` to verify storage",
+                      f"6. Test smart replies: `{ctx.prefix}ai channel smart_replies test 'your message'`\n"
+                      f"7. Check `{ctx.prefix}ai memory show` to verify storage",
                 inline=False
             )
             
-            embed.set_footer(text="💡 All interaction modes now use conversation memory consistently")
+            embed.set_footer(text="💡 All interaction modes now use conversation memory consistently with smart reply control")
             
         except Exception as e:
             embed.add_field(

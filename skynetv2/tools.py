@@ -57,6 +57,8 @@ class ToolsMixin:
             "websearch": {"desc": "Dummy web search (placeholder results)", "run": self._tool_run_websearch},
             # New heuristic auto search router (stub planning output + optional search execution)
             "autosearch": {"desc": "Heuristic routing: classify query -> plan (optional: execute search mode)", "run": self._tool_run_autosearch},
+            # Website fetch/crawl/research via Firecrawl adapter
+            "webfetch": {"desc": "Fetch website content: scrape/crawl/deep_research (uses Firecrawl if configured)", "run": self._tool_run_webfetch},
         }
 
     async def _check_tool_rate_limits(self, guild: discord.Guild, user: discord.User, tool: str | None = None) -> str | None:
@@ -77,11 +79,11 @@ class ToolsMixin:
         # Governance bypass roles
         gov = await self.config.guild(guild).governance()
         bypass_roles = set((gov or {}).get("bypass", {}).get("cooldown_roles", []) if gov else [])
-        member: discord.Member | None = guild.get_member(user.id)
+        member = guild.get_member(user.id) if guild else None
         has_bypass = False
         if member and bypass_roles:
-            for r in member.roles:
-                if r.id in bypass_roles:
+            for r in getattr(member, 'roles', []) or []:
+                if getattr(r, 'id', None) in bypass_roles:
                     has_bypass = True
                     break
         if is_owner or has_bypass:
@@ -95,15 +97,15 @@ class ToolsMixin:
             allow_channels = set((gov.get("tools", {}).get("allow_channels") or []))
             deny_channels = set((gov.get("tools", {}).get("deny_channels") or []))
             # Channel gate
-            if hasattr(self, "_current_channel_id") and self._current_channel_id is not None:
-                ch_id = int(self._current_channel_id)
+            if hasattr(self, "_current_channel_id") and getattr(self, "_current_channel_id") is not None:
+                ch_id = int(getattr(self, "_current_channel_id"))
                 if deny_channels and ch_id in deny_channels:
                     return f"Tool '{tool}' is denied in this channel by governance policy."
                 if allow_channels and ch_id not in allow_channels:
                     return f"Tool '{tool}' is not allowed in this channel by governance policy."
             # Role gate
             if member:
-                member_role_ids = {r.id for r in member.roles}
+                member_role_ids = {getattr(r, 'id', None) for r in getattr(member, 'roles', [])}
                 if deny_roles and (member_role_ids & deny_roles):
                     return f"Tool '{tool}' is denied for your role by governance policy."
                 if allow_roles and not (member_role_ids & allow_roles):
@@ -268,133 +270,106 @@ class ToolsMixin:
             return "\n".join(lines)[:1000]
         return await self._execute_tool_with_telemetry(guild, "websearch", _websearch_impl)
 
-    # New heuristic auto search routing tool (with optional execution of search mode)
-    async def _tool_run_autosearch(self, guild: discord.Guild, query: str, user: discord.User | None = None, execute: bool = False, *_args, **_kwargs) -> str:
+    # New: Website fetch tool using Firecrawl adapter
+    async def _tool_run_webfetch(self, guild: discord.Guild, mode: str, target: str, depth: int | None = None, limit: int | None = None, user: discord.User | None = None) -> str:
         if user:
-            err = await self._check_tool_rate_limits(guild, user, tool="autosearch")
+            err = await self._check_tool_rate_limits(guild, user, tool="webfetch")
             if err:
                 return err
-        
-        async def _autosearch_impl():
-            text = (query or "").strip()
-            if not text:
-                return "(empty query)"
-            mode, params, followups = self._heuristic_classify_autosearch(text)
-            # Classification counter
-            async with self.config.guild(guild).usage() as usage:
-                a = usage.setdefault("autosearch", {"classified": 0, "executed": {"search": 0, "scrape": 0, "crawl": 0, "deep_research": 0}})
-                a["classified"] = int(a.get("classified", 0)) + 1
-            lines = [f"mode: {mode}"]
-            if params:
-                for k, v in params.items():
-                    lines.append(f"{k}: {v}")
-            if followups:
-                lines.append("followups:")
-                for f in followups[:5]:
-                    lines.append(f"- {f}")
-            # Optional execution (only search mode implemented for now)
-            if execute:
-                caps = await self.config.guild(guild).autosearch_caps()
-                char_cap = int(caps.get("scrape_chars", 4000)) if caps else 4000
-                if mode == "search":
-                    kind, api_key = await self._resolve_search_provider_and_key(guild)
-                    provider = build_search_provider(kind=kind, api_key=api_key)
-                    q = params.get("query") or query
-                    results = await provider.search(query=q, topk=int(params.get("limit", 5)))
-                    async with self.config.guild(guild).usage() as usage:
-                        a = usage.setdefault("autosearch", {"classified": 0, "executed": {"search": 0, "scrape": 0, "crawl": 0, "deep_research": 0}})
-                        a.setdefault("executed", {}).setdefault("search", 0)
-                        a["executed"]["search"] = int(a["executed"].get("search", 0)) + 1
-                    lines.append("results:")
-                    autoscrape = False
-                    caps_cfg = await self.config.guild(guild).autosearch_caps()
-                    if caps_cfg and caps_cfg.get("autoscrape_single") and len(results) == 1:
-                        autoscrape = True
-                    if results:
-                        for idx, r in enumerate(results[:5], start=1):
-                            lines.append(f"- {idx}. {r[:140]}")
-                    else:
-                        lines.append("- (no results)")
-                    if autoscrape and results:
-                        firecrawl_key = await self._resolve_firecrawl_api_key(guild)
-                        adapter = build_autoexec_adapter(api_key=firecrawl_key)
-                        first_url = None
-                        # Heuristic to extract a URL-ish token from placeholder result (future real provider may include URL)
-                        for token in results[0].split():
-                            if token.startswith("http://") or token.startswith("https://"):
-                                first_url = token
-                                break
-                        if not first_url:
-                            # fabricate pseudo URL based on query slug
-                            slug = re.sub(r"[^a-z0-9]+", "-", q.lower()).strip("-")[:40] or "result"
-                            first_url = f"https://example.com/{slug}"
-                        scraped = await adapter.scrape(first_url)
-                        if len(scraped) > char_cap:
-                            scraped = scraped[:char_cap] + "..."
-                        await self._increment_autosearch_exec(guild, "scrape")
-                        lines.append("autoscrape:")
-                        lines.append(scraped[:400])
-                elif mode in {"scrape", "scrape_multi", "crawl", "deep_research"}:
-                    firecrawl_key = await self._resolve_firecrawl_api_key(guild)
-                    adapter = build_autoexec_adapter(api_key=firecrawl_key)
-                    exec_lines = []
-                    if mode == "scrape":
-                        url = params.get("url")
-                        if url:
-                            result = await adapter.scrape(url)
-                            if len(result) > char_cap:
-                                result = result[:char_cap] + "..."  # enforce cap
-                            exec_lines.append(result)
-                            await self._increment_autosearch_exec(guild, "scrape")
-                    elif mode == "scrape_multi":
-                        urls = (params.get("urls") or "").split(",")
-                        results = await adapter.scrape_multi([u.strip() for u in urls if u.strip()])
-                        aggregated = []
-                        total_chars = 0
-                        for r in results:
-                            if total_chars + len(r) > char_cap:
-                                remaining = char_cap - total_chars
-                                if remaining > 20:
-                                    aggregated.append(r[:remaining] + "...")
-                                    total_chars = char_cap
-                                break
-                            aggregated.append(r)
-                            total_chars += len(r)
-                        exec_lines.extend(aggregated)
-                        await self._increment_autosearch_exec(guild, "scrape")
-                    elif mode == "crawl":
-                        url = params.get("url")
-                        md = int(params.get("maxDepth", 2) or 2)
-                        md = max(1, min(3, md))  # enforce cap
-                        limit = int(params.get("limit", 20) or 20)
-                        limit = max(5, min(50, limit))  # enforce cap
-                        discovered = await adapter.crawl(url, max_depth=md, limit=limit) if url else []
-                        exec_lines.append("discovered:")
-                        for d in discovered[:10]:
-                            exec_lines.append(f"- {d}")
-                        await self._increment_autosearch_exec(guild, "crawl")
-                    elif mode == "deep_research":
-                        dr = await adapter.deep_research(params.get("query") or query)
-                        steps = dr.get("steps", [])
-                        exec_lines.append("steps:")
-                        for s in steps[:6]:
-                            exec_lines.append(f"- {s}")
-                        summary = dr.get("summary") or ""
-                        if len(summary) > char_cap:
-                            summary = summary[:char_cap] + "..."
-                        if summary:
-                            exec_lines.append(f"summary: {summary}")
-                        await self._increment_autosearch_exec(guild, "deep_research")
-                    if exec_lines:
-                        lines.append("execution:")
-                        lines.extend(exec_lines[:25])
-                    else:
-                        lines.append("execution: (no data)")
-                else:
-                    lines.append(f"execution: (not implemented for mode '{mode}')")
-            return "\n".join(lines)[:1000]
-        
-        return await self._execute_tool_with_telemetry(guild, "autosearch", _autosearch_impl)
+        mode = (mode or "").strip().lower()
+        target = (target or "").strip()
+        if mode not in {"scrape", "crawl", "deep_research"}:
+            return "Unsupported mode. Use one of: scrape, crawl, deep_research"
+        if not target:
+            return "Target is required (URL for scrape/crawl, or query for deep_research)."
+
+        async def _impl():
+            firecrawl_key = await self._resolve_firecrawl_api_key(guild)
+            adapter = build_autoexec_adapter(api_key=firecrawl_key)
+            # Character cap for safety
+            caps = await self.config.guild(guild).autosearch_caps()
+            char_cap = int((caps or {}).get("scrape_chars", 4000))
+            if mode == "scrape":
+                result = await adapter.scrape(target)
+                if len(result) > char_cap:
+                    result = result[:char_cap] + "..."
+                return f"mode: scrape\nurl: {target}\n---\n{result}"
+            if mode == "crawl":
+                md = max(1, min(3, int(depth or 2)))
+                lim = max(5, min(50, int(limit or 20)))
+                discovered = await adapter.crawl(target, max_depth=md, limit=lim)
+                lines = [f"mode: crawl", f"url: {target}", f"depth: {md}", f"limit: {lim}", "discovered:"]
+                for d in (discovered or [])[:10]:
+                    lines.append(f"- {d}")
+                return "\n".join(lines)
+            # deep_research
+            dr = await adapter.deep_research(target)
+            steps = dr.get("steps", [])
+            summary = dr.get("summary") or ""
+            if len(summary) > char_cap:
+                summary = summary[:char_cap] + "..."
+            lines = ["mode: deep_research", f"query: {target}", "steps:"]
+            for s in steps[:6]:
+                lines.append(f"- {s}")
+            if summary:
+                lines.append("summary:")
+                lines.append(summary)
+            return "\n".join(lines)
+        return await self._execute_tool_with_telemetry(guild, "webfetch", _impl)
+
+    # New heuristic auto search routing tool (with optional execution of search mode)
+    async def _tool_run_autosearch(self, guild: discord.Guild, query: str, user: discord.User | None = None, execute: bool = False, *_args, **_kwargs) -> str:
+        """Classify a query and optionally execute the best strategy.
+        Modes: search, scrape, crawl, deep_research, scrape_multi (collapsed to scrape batch).
+        """
+        text = (query or '').strip()
+        if not text:
+            return "(empty query)"
+        mode, params, followups = self._heuristic_classify_autosearch(text)
+        plan_lines = [f"mode: {mode}", f"params: {params}"]
+        if followups:
+            plan_lines.append(f"followups: {', '.join(followups)}")
+        plan = "\n".join(plan_lines)
+        if not execute:
+            # Record classification only
+            await self._increment_autosearch_exec(guild, mode="classified")
+            return plan
+        # Execute path
+        result = ""
+        try:
+            if mode == "search":
+                limit = int(params.get("limit", 5))
+                q = params.get("query", text)
+                result = await self._tool_run_websearch(guild, q, topk=limit, user=user)
+                await self._increment_autosearch_exec(guild, mode="search")
+            elif mode == "scrape":
+                url = params.get("url") or text
+                result = await self._tool_run_webfetch(guild, "scrape", url, user=user)
+                await self._increment_autosearch_exec(guild, mode="scrape")
+            elif mode == "scrape_multi":
+                urls_csv = params.get("urls", "")
+                urls = [u.strip() for u in urls_csv.split(',') if u.strip()]
+                combined: List[str] = []
+                for u in urls[:3]:  # limit to 3 for safety
+                    out = await self._tool_run_webfetch(guild, "scrape", u, user=user)
+                    combined.append(f"### {u}\n{out[:1200]}")
+                result = "\n\n".join(combined)
+                await self._increment_autosearch_exec(guild, mode="scrape")
+            elif mode == "crawl":
+                url = params.get("url") or text
+                depth = int(params.get("maxDepth", 2))
+                limit = int(params.get("limit", 20))
+                result = await self._tool_run_webfetch(guild, "crawl", url, limit=limit, depth=depth, user=user)
+                await self._increment_autosearch_exec(guild, mode="crawl")
+            elif mode == "deep_research":
+                q = params.get("query", text)
+                result = await self._tool_run_webfetch(guild, "deep_research", q, user=user)
+                await self._increment_autosearch_exec(guild, mode="deep_research")
+            else:
+                result = plan
+        except Exception as e:
+            result = f"autosearch error: {type(e).__name__}: {str(e)[:120]}"
+        return result
 
     async def _increment_autosearch_exec(self, guild: discord.Guild, mode: str):
         async with self.config.guild(guild).usage() as usage:

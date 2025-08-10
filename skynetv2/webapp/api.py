@@ -55,7 +55,7 @@ async def _get_guild_with_access(request: web.Request) -> Tuple[Dict[str, Any] |
     perms = user.get('permissions', {}) if isinstance(user, dict) else {}
     if str(gid) not in perms.get('guilds', []):
         return user, web.json_response({'error': 'forbidden'}, status=403), None, gid, False
-    guild = webiface.cog.bot.get_guild(gid)
+    guild = request.app['webiface'].cog.bot.get_guild(gid)
     if not guild:
         return user, web.json_response({'error': 'not_found'}, status=404), None, gid, False
     is_admin = (str(gid) in perms.get('guild_admin', [])) or perms.get('bot_owner', False)
@@ -368,6 +368,42 @@ async def handle_auto_web_search_config(request: web.Request):
     except Exception:
         return web.json_response({'error': 'update_failed'}, status=500)
 
+# ---- Memory scopes (per-user memory) config ----
+async def handle_memory_scopes_config(request: web.Request):
+    user, resp, guild, gid, is_admin = await _get_guild_with_access(request)
+    if resp:
+        return resp
+    if not is_admin:
+        return web.json_response({'error': 'forbidden'}, status=403)
+    payload = await request.json()
+    # normalize booleans coming from checkbox or string
+    def _to_bool(v: object) -> bool:
+        if isinstance(v, bool):
+            return v
+        if isinstance(v, str):
+            return v.lower() in ('1','true','yes','on','checked')
+        return bool(v)
+    enabled = _to_bool(payload.get('per_user_enabled', False))
+    try:
+        limit = int(payload.get('per_user_limit', 10))
+    except (ValueError, TypeError):
+        limit = 10
+    limit = max(1, min(100, limit))
+    strategy = str(payload.get('merge_strategy') or 'append').lower()
+    if strategy not in ('append','interleave','user_first'):
+        strategy = 'append'
+    config = request.app['webiface'].cog.config.guild(guild)
+    try:
+        async with config.memory() as mem:
+            if 'scopes' not in mem or not isinstance(mem['scopes'], dict):
+                mem['scopes'] = {}
+            mem['scopes']['per_user_enabled'] = enabled
+            mem['scopes']['per_user_limit'] = limit
+            mem['scopes']['merge_strategy'] = strategy
+        return web.json_response({'success': True})
+    except Exception:
+        return web.json_response({'error': 'update_failed'}, status=500)
+
 # ---- Governance config ----
 async def handle_governance_config(request: web.Request):
     user, resp, guild, gid, is_admin = await _get_guild_with_access(request)
@@ -454,6 +490,44 @@ async def handle_chat_test(request: web.Request):
         return web.json_response({'success': True, 'text': text})
     except ProviderError:
         return web.json_response({'error': 'provider_error'}, status=502)
+    except Exception:
+        return web.json_response({'error': 'request_failed'}, status=500)
+
+# ---- Webfetch test (admin-only) ----
+async def handle_webfetch_test(request: web.Request):
+    user, resp, guild, gid, is_admin = await _get_guild_with_access(request)
+    if resp:
+        return resp
+    if not is_admin:
+        return web.json_response({'error': 'forbidden'}, status=403)
+    payload = await request.json()
+    mode = str(payload.get('mode') or '').strip().lower()
+    target = str(payload.get('target') or '').strip()
+    if not mode or not target:
+        return web.json_response({'error': 'invalid_payload'}, status=400)
+    try:
+        limit = payload.get('limit')
+        depth = payload.get('depth')
+        try:
+            limit = int(limit) if limit is not None and str(limit).strip() != '' else None
+        except (ValueError, TypeError):
+            limit = None
+        try:
+            depth = int(depth) if depth is not None and str(depth).strip() != '' else None
+        except (ValueError, TypeError):
+            depth = None
+        # Clamp to safe bounds
+        if limit is not None:
+            limit = max(1, min(50, limit))
+        if depth is not None:
+            depth = max(0, min(3, depth))
+        # Execute via cog tool
+        result = await request.app['webiface'].cog._tool_run_webfetch(guild=guild, mode=mode, target=target, limit=limit, depth=depth, user=None)
+        if not isinstance(result, str):
+            result = str(result)
+        if len(result) > 2000:
+            result = result[:2000]
+        return web.json_response({'success': True, 'text': result})
     except Exception:
         return web.json_response({'error': 'request_failed'}, status=500)
 
@@ -596,9 +670,12 @@ def setup(webiface: Any):
     r.add_post('/api/guild/{guild_id}/config/channel_listening', handle_channel_listening_config)
     r.add_post('/api/guild/{guild_id}/config/smart_replies', handle_smart_replies_config)
     r.add_post('/api/guild/{guild_id}/config/auto_web_search', handle_auto_web_search_config)
+    r.add_post('/api/guild/{guild_id}/config/memory_scopes', handle_memory_scopes_config)
     r.add_post('/api/guild/{guild_id}/config/governance', handle_governance_config)
     # Chat test
     r.add_post('/api/guild/{guild_id}/chat_test', handle_chat_test)
+    # Webfetch test (admin-only)
+    r.add_post('/api/guild/{guild_id}/webfetch_test', handle_webfetch_test)
     # Global config
     r.add_post('/api/global/config/providers', handle_global_providers_config)
     r.add_post('/api/global/config/web_flags', handle_global_web_flags)

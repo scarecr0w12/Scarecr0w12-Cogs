@@ -103,3 +103,19 @@ Notes:
 - Content Caps: Autosearch execution enforces character caps on aggregated scrape output to prevent oversized Discord responses.
 - Fallback Behavior: If no API key configured, placeholder adapter returns stub results (no network calls).
 - URL Sanitization: Basic hostname/IP parsing before execution; unsafe targets rejected with `[scrape:blocked]` / `[crawl:blocked]` tags.
+
+### Firecrawl Usage Examples
+
+- Set global key:
+  - `[p]ai provider key set firecrawl YOUR_KEY --global`
+- Scrape a page:
+  - `/skynet webfetch mode:scrape target:https://example.com`
+- Crawl a site (limits enforced):
+  - `/skynet webfetch mode:crawl target:https://example.com limit:25 depth:2`
+- Deep research on a query:
+  - `/skynet webfetch mode:deep_research target:"best LLM eval datasets"`
+
+Troubleshooting:
+- If results look like placeholders, confirm the Firecrawl key is set (Global Config → Providers, or `[p]ai provider key show firecrawl`).
+- Very long outputs are truncated by stretch.truncation settings; increase caps if needed.
+- Governance/rate limits may block frequent calls; see Rate Limits and Governance sections.

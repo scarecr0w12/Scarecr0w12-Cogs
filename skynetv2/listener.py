@@ -213,12 +213,12 @@ class ListenerMixin:
                 # Log the AI request with usage info
                 last_usage = getattr(provider, "get_last_usage", lambda: None)()
                 model_name = model["name"] if isinstance(model, dict) else str(model)
-                tokens_used = last_usage.get('total_tokens', 0) if last_usage else 0
+                tokens_used = last_usage.get('total', 0) if last_usage else 0
                 await log_ai_request(guild, message.author, message.channel, provider_name, model_name, tokens_used)
                 
                 # Update usage statistics
                 if last_usage:
-                    async with s.config.guild(guild).usage as usage:
+                    async with s.config.guild(guild).usage() as usage:
                         t = usage.setdefault("tokens", {"prompt": 0, "completion": 0, "total": 0})
                         t["prompt"] = int(t.get("prompt", 0)) + int(last_usage.get("prompt", 0))
                         t["completion"] = int(t.get("completion", 0)) + int(last_usage.get("completion", 0))
@@ -232,7 +232,7 @@ class ListenerMixin:
                 
                 # Store conversation in memory (always, for all modes)
                 print(f"[SkynetV2 Listener] Storing conversation in memory...")
-                await s._memory_remember(guild, message.channel.id, processed_content or "Hello", text)
+                await s._memory_remember(guild, message.channel.id, processed_content or "Hello", text, user=message.author)
                 
                 # Send response using smart message handling
                 print(f"[SkynetV2 Listener] Sending response with smart chunking: {len(text)} characters...")

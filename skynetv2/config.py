@@ -208,7 +208,14 @@ Always include **practical examples** and **actionable information**.""",
         },
         "tools": {"enabled": {}},
         # Added pruning policy (max_items hard cap across messages list; max_age_days age trimming on write)
-        "memory": {"default_limit": 10, "per_channel": {}, "prune": {"max_items": 400, "max_age_days": 30}},
+        "memory": {
+            "default_limit": 10,
+            "per_channel": {},
+            # New per-user memory (default OFF). Structure: per_user[user_id].per_channel[channel_id].messages/limit
+            "per_user": {},
+            "scopes": {"per_user_enabled": False, "per_user_limit": 10, "merge_strategy": "append"},
+            "prune": {"max_items": 400, "max_age_days": 30}
+        },
         # Governance: tool allow/deny lists, cooldown bypass roles, simple per-user daily budget caps (0 disables)
         "governance": {"tools": {"allow": [], "deny": [], "per_user_minute_overrides": {}, "allow_roles": [], "deny_roles": [], "allow_channels": [], "deny_channels": []}, "bypass": {"cooldown_roles": []}, "budget": {"per_user_daily_tokens": 0, "per_user_daily_cost_usd": 0.0}},
         "policy": {"models": {"allow": {}, "deny": {}}},

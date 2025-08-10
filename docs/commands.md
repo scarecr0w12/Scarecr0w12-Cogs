@@ -84,10 +84,22 @@ SkynetV2 now includes comprehensive Discord markdown formatting throughout all r
 - /skynet tools disable name:string
 - /skynet websearch query:string (records tool usage telemetry; subject to tool rate limits)
 - /skynet autosearch query:string execute?:bool (heuristic classification; executes search mode and stub executions for other modes)
+- /skynet webfetch mode:string target:string limit?:int depth?:int
 - [p]ai tools list|enable|disable `name`
 - [p]ai websearch `query`
 - [p]ai autosearch `query [--exec]` (append --exec to run execution; non-search modes are stubbed)
+- [p]ai webfetch `<mode> <target> [limit] [depth]`
 - [p]ai (internal ping tool via registry but no direct command; callable from future agent flow)
+
+Webfetch modes:
+- `scrape` – Fetch and summarize a single page.
+- `crawl` – Crawl from a start URL (depth<=3, limit<=50) and list discovered URLs plus brief notes.
+- `deep_research` – Multi-source research on a query using the configured adapter.
+
+Notes:
+- Requires Firecrawl API key for real scraping/crawling; otherwise returns placeholders. Set with `[p]ai provider key set firecrawl <KEY> --global`.
+- Output is truncated to fit Discord limits and configured stretch.truncation caps.
+- Tool invocations respect governance and rate limits; results may be cached for up to 1 hour.
 
 ## Search Provider
 
@@ -111,6 +123,7 @@ Supported providers: openai, serp, firecrawl
 - /skynet memory export user_id?:int (ephemeral; DM alternative via prefix)
 - /skynet memory clear (clears all guild memory)
 - /skynet memory prune_policy max_items?:int max_age_days?:int
+- /skynet memory scope per_user_enabled?:bool per_user_limit?:int merge_strategy?:append|interleave|user_first
 - [p]ai memory show [limit]
 - [p]ai memory prune [limit]
 - [p]ai memory export [user_id]

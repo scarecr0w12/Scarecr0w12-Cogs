@@ -196,6 +196,13 @@ Tool registry and enable/disable states:
   - autosearch: { classified:int, executed: { search:int, scrape:int, crawl:int, deep_research:int } }
 - listening: { enabled, mode, keywords }
 - memory: { default_limit, per_channel: { id: { limit, messages[] } }, prune: { max_items:int, max_age_days:int } }
+- New (optional) per-user memory support (default: off):
+  - memory.scopes.per_user_enabled: bool
+  - memory.scopes.per_user_limit: int (pairs per user per channel)
+  - memory.scopes.merge_strategy: append | interleave | user_first
+  - memory.per_user: { user_id: { per_channel: { channel_id: { messages[], limit? } } } }
+
+Admins can toggle and tune via `/skynet memory scope`.
 - policy: allow/deny model lists
 - search: optional override { provider } else inherits global (providers: dummy, serp, serp-stub)
 - autosearch_caps: { scrape_chars, depth, limit } (configured per guild)

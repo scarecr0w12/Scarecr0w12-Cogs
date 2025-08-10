@@ -103,6 +103,27 @@ async function sendChatTest(formId, resultBoxId, textId){
     text.textContent = 'Request failed';
   }
 }
+// Webfetch helper
+async function sendWebfetch(formId, resultBoxId, textId){
+  try{
+    const form = document.getElementById(formId);
+    const action = form.getAttribute('action');
+    const payload = {};
+    Array.from(form.elements).forEach(el=>{ if(el.name){ if(el.type==='checkbox'){ payload[el.name]=!!el.checked; } else { payload[el.name]=el.value; } } });
+    const res = await fetch(action,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+    const data = await res.json();
+    const box = document.getElementById(resultBoxId);
+    const text = document.getElementById(textId);
+    if(box) box.style.display = 'block';
+    if(data && data.success){ text.textContent = data.text || '(empty)'; }
+    else { text.textContent = 'Error: '+(data && data.error ? data.error : 'unknown'); }
+  }catch(e){
+    const box = document.getElementById(resultBoxId);
+    const text = document.getElementById(textId);
+    if(box) box.style.display = 'block';
+    text.textContent = 'Request failed';
+  }
+}
 </script>
 """
 
@@ -274,6 +295,7 @@ async def dashboard(request: web.Request):
                     </button>
                     {f'''<button onclick="location.href='/guild/{g.id}/config'" class="btn-sm">⚙️ Configure</button>''' if is_admin else ''}
                     {f'''<button onclick="location.href='/guild/{g.id}/channels'" class="btn-secondary btn-sm">📝 Channels</button>''' if is_admin else ''}
+                    {f'''<button onclick="location.href='/guild/{g.id}/website-check'" class="btn-secondary btn-sm">🌐 Website Check</button>''' if is_admin else ''}
                 </div>
             """
             
@@ -499,6 +521,7 @@ async def guild_dashboard(request: web.Request):
             <button onclick=\"location.href='/guild/{guild_id_for_js}/governance'\" class="secondary">🛡️ Governance</button>
             <button onclick="location.href='/test/{guild_id_for_js}'" class="secondary">🧪 Test AI Chat</button>
             <button onclick="location.href='/usage/{guild_id_for_js}'" class="secondary">📊 Usage Statistics</button>
+            <button onclick="location.href='/guild/{guild_id_for_js}/website-check'" class="secondary">🌐 Website Check</button>
         </div>
         """
     
@@ -569,6 +592,11 @@ async def guild_config(request: web.Request):
     autosearch_caps = await config.autosearch_caps()
     smart_replies_cfg = await config.smart_replies()
     auto_web_search_cfg = await config.auto_web_search()
+    memory_cfg = await config.memory()
+    scopes = (memory_cfg or {}).get('scopes', {}) if memory_cfg else {}
+    per_user_enabled = bool(scopes.get('per_user_enabled', False))
+    per_user_limit = int(scopes.get('per_user_limit', 10) or 10)
+    merge_strategy = str(scopes.get('merge_strategy', 'append') or 'append')
     
     # Provider configuration form
     providers_form = """
@@ -818,6 +846,37 @@ async def guild_config(request: web.Request):
     </div>
     """
     
+    # Memory scopes configuration (per-user memory)
+    memory_scopes_form = f"""
+    <div class='card'>
+        <h2>Memory Scopes</h2>
+        <p>Control per-user memory behavior. When enabled, the bot will maintain history per user per guild and merge it with channel memory.</p>
+        <form id='memory-scopes-form' action='/api/guild/{gid}/config/memory_scopes' method='POST'>
+            <div class='form-group'>
+                <label for='per_user_enabled'>Enable Per-User Memory</label>
+                <input type='checkbox' id='per_user_enabled' name='per_user_enabled' {'checked' if per_user_enabled else ''} />
+            </div>
+            <div class='form-row'>
+                <div class='form-group'>
+                    <label for='per_user_limit'>Per-User Memory Limit (messages)</label>
+                    <input type='number' id='per_user_limit' name='per_user_limit' min='1' max='100' value='{per_user_limit}' />
+                </div>
+                <div class='form-group'>
+                    <label for='merge_strategy'>Merge Strategy</label>
+                    <select id='merge_strategy' name='merge_strategy'>
+                        <option value='append' {'selected' if merge_strategy=='append' else ''}>Append (channel then user)</option>
+                        <option value='interleave' {'selected' if merge_strategy=='interleave' else ''}>Interleave</option>
+                        <option value='user_first' {'selected' if merge_strategy=='user_first' else ''}>User First</option>
+                    </select>
+                </div>
+            </div>
+            <div class='form-row'>
+                <button type='button' onclick='submitForm("memory-scopes-form")' class='btn-primary'>Save Memory Scopes</button>
+            </div>
+        </form>
+    </div>
+    """
+
     # Governance configuration
     gov_cfg = await config.governance()
     tools_gov = (gov_cfg or {}).get('tools', {}) if gov_cfg else {}
@@ -903,6 +962,7 @@ async def guild_config(request: web.Request):
     {listening_form}
     {smart_replies_form}
     {auto_web_search_form}
+    {memory_scopes_form}
     {governance_form}
     <div class='form-row' style='margin-top:12px;'>
         <button type='button' onclick="location.href='/guild/{gid}'" class='btn-secondary'>← Back to Guild</button>
@@ -1354,43 +1414,79 @@ async def guild_test(request: web.Request):
     """
     return web.Response(text=_html_base('Test Chat', body), content_type='text/html')
 
-async def bot_stats(request: web.Request):
+async def guild_website_check(request: web.Request):
     webiface = request.app['webiface']
     user, resp = await _require_session(request)
     if resp: return resp
+    try:
+        gid = int(request.match_info['guild_id'])
+    except ValueError:
+        return web.Response(text='Invalid guild id', status=400)
     perms = user.get('permissions', {}) if isinstance(user, dict) else {}
-    if not perms.get('bot_owner', False):
-        return web.Response(text='Forbidden', status=403)
-    bot = webiface.cog.bot
-    total_guilds = len(bot.guilds)
-    total_members = sum(g.member_count or 0 for g in bot.guilds)
+    is_admin = (str(gid) in perms.get('guild_admin', [])) or perms.get('bot_owner', False)
+    if not is_admin:
+        return web.Response(text='Admin access required', status=403)
+    guild = webiface.cog.bot.get_guild(gid)
+    if not guild:
+        return web.Response(text='Guild not found', status=404)
+
     body = f"""
-    <h1>Bot Statistics</h1>
+    <h1>Website Check - {guild.name}</h1>
     <div class='card'>
-      <ul>
-        <li>Total guilds: {total_guilds}</li>
-        <li>Estimated total members: {total_members}</li>
-      </ul>
-      <button onclick=\"location.href='/dashboard'\" class='btn-secondary'>← Back</button>
+      <p>Test the webfetch tool (Firecrawl). Requires a Firecrawl API key. Results are truncated for display.</p>
+      <form id='webfetch-form' action='/api/guild/{gid}/webfetch_test' method='POST'>
+        <div class='form-row'>
+          <div class='form-group' style='flex:2'>
+            <label for='mode'>Mode</label>
+            <select id='mode' name='mode'>
+              <option value='scrape'>Scrape</option>
+              <option value='crawl'>Crawl</option>
+              <option value='deep_research'>Deep Research</option>
+            </select>
+          </div>
+          <div class='form-group' style='flex:5'>
+            <label for='target'>URL or Query</label>
+            <input type='text' id='target' name='target' placeholder='https://example.com or topic to research' />
+          </div>
+        </div>
+        <div class='form-row'>
+          <div class='form-group'>
+            <label for='limit'>Limit (optional)</label>
+            <input type='number' id='limit' name='limit' min='1' max='50' />
+          </div>
+          <div class='form-group'>
+            <label for='depth'>Depth (optional)</label>
+            <input type='number' id='depth' name='depth' min='0' max='3' />
+          </div>
+        </div>
+        <div class='form-row'>
+          <button type='button' onclick="sendWebfetch('webfetch-form','webfetch-result','webfetch-text')" class='btn-primary'>Run</button>
+          <button type='button' onclick=\"location.href='/guild/{gid}'\" class='btn-secondary'>← Back</button>
+        </div>
+      </form>
+    </div>
+    <div id='webfetch-result' class='card' style='display:none;'>
+      <div class='card-body'>
+        <strong>Result:</strong>
+        <pre id='webfetch-text' style='white-space:pre-wrap; max-height: 480px; overflow:auto;'></pre>
+      </div>
     </div>
     """
-    return web.Response(text=_html_base('Bot Stats', body), content_type='text/html')
+    return web.Response(text=_html_base('Website Check', body), content_type='text/html')
 
+# Register routes
 def setup(webiface: Any):
-    """Register currently implemented page routes."""
     app = webiface.app
     app['webiface'] = webiface
     r = app.router
     r.add_get('/dashboard', dashboard)
     r.add_get('/profile', profile)
+    r.add_get('/global-config', global_config)
+    r.add_get('/logs', logs_page)
     r.add_get('/guild/{guild_id}', guild_dashboard)
     r.add_get('/guild/{guild_id}/config', guild_config)
-    r.add_get('/guild/{guild_id}/governance', guild_governance)
     r.add_get('/guild/{guild_id}/channels', guild_channels)
-    r.add_get('/guild/{guild_id}/prompts', guild_prompts)
-    r.add_get('/usage/{guild_id}', guild_usage)
+    r.add_get('/guild/{guild_id}/governance', guild_governance)
+    r.add_get('/guild/{guild_id}/website-check', guild_website_check)
     r.add_get('/test/{guild_id}', guild_test)
-    r.add_get('/bot-stats', bot_stats)
-    r.add_get('/logs', logs_page)
-    r.add_get('/global-config', global_config)
-
+    r.add_get('/usage/{guild_id}', guild_usage)

@@ -4,6 +4,7 @@ import asyncio
 import io
 import json
 import time
+import logging
 from typing import Optional, Tuple, List, Dict, Any
 
 import discord # type: ignore
@@ -28,8 +29,13 @@ from .web.server import WebServer  # modular web server
 class SkynetV2(ToolsMixin, MemoryMixin, StatsMixin, ListenerMixin, OrchestrationMixin, commands.Cog):
     """SkynetV2: AI assistant for Red-DiscordBot (MVP)."""
 
+    # Slash command groups (class-level) so Red registers them under /skynet and /skynet memory
+    ai_slash = app_commands.Group(name="skynet", description="AI assistant commands")
+    mem_group = app_commands.Group(name="memory", description="Memory controls", parent=ai_slash)
+
     def __init__(self, bot):
         self.bot = bot
+        self.logger = logging.getLogger("red.skynetv2.cog")
         self.config = register_config(self)
         # simple in-memory cache for model lists: key=(provider, api_key)
         self._model_cache: dict[Tuple[str, str], Tuple[int, List[str]]] = {}
@@ -254,9 +260,9 @@ class SkynetV2(ToolsMixin, MemoryMixin, StatsMixin, ListenerMixin, Orchestration
         if ctx.invoked_subcommand is None:
             return  # avoid duplicate help spam
 
-    @ai_group.command(name="chat")
+    @ai_group.command(name="ask")
     @commands.bot_has_permissions(send_messages=True)
-    async def ai_chat(self, ctx: commands.Context, *, message: str):
+    async def ai_ask(self, ctx: commands.Context, *, message: str):
         err = await self._check_and_record_usage(ctx.guild, ctx.channel, ctx.author)
         if err:
             await ctx.send(err)
@@ -300,8 +306,9 @@ class SkynetV2(ToolsMixin, MemoryMixin, StatsMixin, ListenerMixin, Orchestration
             search_context = ""
             
             if auto_search_config.get('enabled', False):
+                allowed = auto_search_config.get('allowed_commands', ['ask', 'chat', 'chatstream'])
                 # Check if command is allowed for auto search
-                if "chat" in auto_search_config.get('allowed_commands', ['chat', 'chatstream']):
+                if 'ask' in allowed or 'chat' in allowed:
                     # Check user cooldown
                     user_id = str(ctx.author.id)
                     cooldown_seconds = auto_search_config.get('cooldown_seconds', 60)
@@ -748,7 +755,11 @@ class SkynetV2(ToolsMixin, MemoryMixin, StatsMixin, ListenerMixin, Orchestration
         budget = gov.get("budget", {}) if gov else {}
         lines.append("tools_allow: " + ",".join(tools.get("allow", [])))
         lines.append("tools_deny: " + ",".join(tools.get("deny", [])))
-        lines.append("per_user_minute_overrides: " + (",".join(f"{k}:{v}" for k,v in (tools.get("per_user_minute_overrides", {}) or {}).items()) or "(none)"))
+        overrides = (tools.get("per_user_minute_overrides", {}) or {})
+        if overrides:
+            lines.append("per_user_minute_overrides: " + ",".join(f"{k}:{int(v)}" for k, v in overrides.items()))
+        else:
+            lines.append("per_user_minute_overrides: (none)")
         lines.append("bypass_cooldown_roles: " + (",".join(str(r) for r in bypass.get("cooldown_roles", [])) or "(none)"))
         lines.append(f"budget_per_user_daily_tokens: {int(budget.get('per_user_daily_tokens', 0))}")
         await ctx.send(box("\n".join(lines), "yaml"))
@@ -828,102 +839,8 @@ class SkynetV2(ToolsMixin, MemoryMixin, StatsMixin, ListenerMixin, Orchestration
         await self._gov_update(ctx.guild, lambda g: g.setdefault("budget", {}).update({"per_user_daily_tokens": max(0, int(per_user_daily_tokens))}))
         await ctx.tick()
 
-    # ----------------
-    # Slash commands
-    # ----------------
-
-    ai_slash = app_commands.Group(name="skynet", description="AI assistant commands")
-    
-    # All slash command groups defined at class level
-    governance_group = app_commands.Group(name="governance", description="Governance controls", parent=ai_slash)
-    mem_group = app_commands.Group(name="memory", description="Memory controls", parent=ai_slash)
-    rate_group = app_commands.Group(name="rate", description="Rate limit controls", parent=ai_slash)
-    tools_group = app_commands.Group(name="tools", description="Tool management", parent=ai_slash)
-    search_group = app_commands.Group(name="search", description="Search provider controls", parent=ai_slash)
-    provider_group = app_commands.Group(name="provider", description="Provider management", parent=ai_slash)
-    channel_group = app_commands.Group(name="channel", description="Per-channel AI listening configuration", parent=ai_slash)
-
-    @governance_group.command(name="show", description="Show governance policy")
-    @app_commands.checks.has_permissions(manage_guild=True)
-    async def slash_governance_show(self, interaction: discord.Interaction):
-        assert interaction.guild is not None
-        gov = await self._gov_get(interaction.guild)
-        tools = gov.get("tools", {}) if gov else {}
-        bypass = gov.get("bypass", {}) if gov else {}
-        budget = gov.get("budget", {}) if gov else {}
-        lines = [
-            "tools_allow: " + ",".join(tools.get("allow", [])),
-            "tools_deny: " + ",".join(tools.get("deny", [])),
-            "per_user_minute_overrides: " + (",".join(f"{k}:{v}" for k,v in (tools.get("per_user_minute_overrides", {}) or {}).items()) or "(none)"),
-            "bypass_cooldown_roles: " + (",".join(str(r) for r in bypass.get("cooldown_roles", [])) or "(none)"),
-            f"budget_per_user_daily_tokens: {int(budget.get('per_user_daily_tokens', 0))}",
-        ]
-        await interaction.response.send_message(box("\n".join(lines), "yaml"), ephemeral=True)
-
-    @governance_group.command(name="allow_add", description="Add allowed tool")
-    @app_commands.checks.has_permissions(manage_guild=True)
-    async def slash_governance_allow_add(self, interaction: discord.Interaction, tool: str):
-        assert interaction.guild is not None
-        await self._gov_update(interaction.guild, lambda g: g.setdefault("tools", {}).setdefault("allow", []).append(tool) if tool not in g.setdefault("tools", {}).setdefault("allow", []) else None)
-        await interaction.response.send_message("Added.", ephemeral=True)
-
-    @governance_group.command(name="allow_remove", description="Remove allowed tool")
-    @app_commands.checks.has_permissions(manage_guild=True)
-    async def slash_governance_allow_remove(self, interaction: discord.Interaction, tool: str):
-        assert interaction.guild is not None
-        await self._gov_update(interaction.guild, lambda g: g.setdefault("tools", {}).setdefault("allow", []).remove(tool) if tool in g.setdefault("tools", {}).setdefault("allow", []) else None)
-        await interaction.response.send_message("Removed.", ephemeral=True)
-
-    @governance_group.command(name="deny_add", description="Add denied tool")
-    @app_commands.checks.has_permissions(manage_guild=True)
-    async def slash_governance_deny_add(self, interaction: discord.Interaction, tool: str):
-        assert interaction.guild is not None
-        await self._gov_update(interaction.guild, lambda g: g.setdefault("tools", {}).setdefault("deny", []).append(tool) if tool not in g.setdefault("tools", {}).setdefault("deny", []) else None)
-        await interaction.response.send_message("Added.", ephemeral=True)
-
-    @governance_group.command(name="deny_remove", description="Remove denied tool")
-    @app_commands.checks.has_permissions(manage_guild=True)
-    async def slash_governance_deny_remove(self, interaction: discord.Interaction, tool: str):
-        assert interaction.guild is not None
-        await self._gov_update(interaction.guild, lambda g: g.setdefault("tools", {}).setdefault("deny", []).remove(tool) if tool in g.setdefault("tools", {}).setdefault("deny", []) else None)
-        await interaction.response.send_message("Removed.", ephemeral=True)
-
-    @governance_group.command(name="bypass_addrole", description="Add cooldown bypass role")
-    @app_commands.checks.has_permissions(manage_guild=True)
-    async def slash_governance_bypass_add(self, interaction: discord.Interaction, role: discord.Role):
-        assert interaction.guild is not None
-        await self._gov_update(interaction.guild, lambda g: g.setdefault("bypass", {}).setdefault("cooldown_roles", []).append(role.id) if role.id not in g.setdefault("bypass", {}).setdefault("cooldown_roles", []) else None)
-        await interaction.response.send_message("Added.", ephemeral=True)
-
-    @governance_group.command(name="bypass_removerole", description="Remove cooldown bypass role")
-    @app_commands.checks.has_permissions(manage_guild=True)
-    async def slash_governance_bypass_removerole(self, interaction: discord.Interaction, role: discord.Role):
-        assert interaction.guild is not None
-        await self._gov_update(interaction.guild, lambda g: g.setdefault("bypass", {}).setdefault("cooldown_roles", []).remove(role.id) if role.id in g.setdefault("bypass", {}).setdefault("cooldown_roles", []) else None)
-        await interaction.response.send_message("Removed.", ephemeral=True)
-
-    @governance_group.command(name="override_set", description="Set per-user/min override for a tool")
-    @app_commands.checks.has_permissions(manage_guild=True)
-    async def slash_governance_override_set(self, interaction: discord.Interaction, tool: str, per_minute: int):
-        assert interaction.guild is not None
-        await self._gov_update(interaction.guild, lambda g: g.setdefault("tools", {}).setdefault("per_user_minute_overrides", {}).update({tool: int(per_minute)}))
-        await interaction.response.send_message("Override set.", ephemeral=True)
-
-    @governance_group.command(name="override_clear", description="Clear per-user/min override for a tool")
-    @app_commands.checks.has_permissions(manage_guild=True)
-    async def slash_governance_override_clear(self, interaction: discord.Interaction, tool: str):
-        assert interaction.guild is not None
-        await self._gov_update(interaction.guild, lambda g: g.setdefault("tools", {}).setdefault("per_user_minute_overrides", {}).pop(tool, None))
-        await interaction.response.send_message("Override cleared.", ephemeral=True)
-
-    @governance_group.command(name="budget_settokens", description="Set per-user daily token budget")
-    @app_commands.checks.has_permissions(manage_guild=True)
-    async def slash_governance_budget_settokens(self, interaction: discord.Interaction, per_user_daily_tokens: int):
-        assert interaction.guild is not None
-        await self._gov_update(interaction.guild, lambda g: g.setdefault("budget", {}).update({"per_user_daily_tokens": max(0, int(per_user_daily_tokens))}))
-        await interaction.response.send_message("Budget updated.", ephemeral=True)
-
-    @ai_group.command(name="chat", description="Chat once with the configured model")
+    # Register slash chat under the slash command group, not the prefix group
+    @ai_slash.command(name="chat", description="Chat once with the configured model")
     @app_commands.describe(message="Your message to the assistant", stream="Stream partial output (edits message)")
     async def slash_chat(self, interaction: discord.Interaction, message: str, stream: Optional[bool] = False):
         assert interaction.guild is not None
@@ -1089,7 +1006,7 @@ class SkynetV2(ToolsMixin, MemoryMixin, StatsMixin, ListenerMixin, Orchestration
         app_commands.Choice(name="interleave", value="interleave"),
         app_commands.Choice(name="user_first", value="user_first"),
     ])
-    @app_commands.checks.has_permissions(manage_guild=True)
+    @app_commands.default_permissions(manage_guild=True)
     async def slash_memory_scope(self, interaction: discord.Interaction, per_user_enabled: Optional[bool] = None, per_user_limit: Optional[int] = None, merge_strategy: Optional[str] = None):
         assert interaction.guild is not None
         async with self.config.guild(interaction.guild).memory() as mem:

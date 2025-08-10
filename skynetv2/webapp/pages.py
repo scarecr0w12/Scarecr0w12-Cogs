@@ -82,6 +82,27 @@ async function toggleSetting(gid, setting, value){
 function updateSensitivityDisplay(input, id){
   const el = document.getElementById(id); if(el) el.textContent = input.value;
 }
+// Chat test helper
+async function sendChatTest(formId, resultBoxId, textId){
+  try{
+    const form = document.getElementById(formId);
+    const action = form.getAttribute('action');
+    const payload = {};
+    Array.from(form.elements).forEach(el=>{ if(el.name){ if(el.type==='checkbox'){ payload[el.name]=!!el.checked; } else { payload[el.name]=el.value; } } });
+    const res = await fetch(action,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+    const data = await res.json();
+    const box = document.getElementById(resultBoxId);
+    const text = document.getElementById(textId);
+    if(box) box.style.display = 'block';
+    if(data && data.success){ text.textContent = data.text || '(empty)'; }
+    else { text.textContent = 'Error: '+(data && data.error ? data.error : 'unknown'); }
+  }catch(e){
+    const box = document.getElementById(resultBoxId);
+    const text = document.getElementById(textId);
+    if(box) box.style.display = 'block';
+    text.textContent = 'Request failed';
+  }
+}
 </script>
 """
 
@@ -92,6 +113,7 @@ def _html_base(title: str, body: str, active_section: str | None = None) -> str:
         "<a href='/dashboard'>Dashboard</a>"
         "<a href='/profile'>Profile</a>"
         "<a href='/global-config'>Global Config</a>"
+        "<a href='/logs'>Logs</a>"
         "</nav>"
     )
     return f"""<!DOCTYPE html>
@@ -123,9 +145,17 @@ def _user_access_guild(user, gid: int) -> bool:
 
 async def _require_session(request: web.Request):
     session = await get_session(request); user = session.get('user')
-    print(f"SkynetV2 Web: Session check - user present: {user is not None}")
-    if not user: 
-        print("SkynetV2 Web: Session check failed - redirecting to login")
+    # Gate debug prints via global flag
+    try:
+        webiface = request.app.get('webiface')
+        web_debug = bool(await webiface.cog.config.web_debug()) if webiface else False
+    except Exception:
+        web_debug = False
+    if web_debug:
+        print(f"SkynetV2 Web: Session check - user present: {user is not None}")
+    if not user:
+        if web_debug:
+            print("SkynetV2 Web: Session check failed - redirecting to login")
         return None, web.HTTPFound('/')
     return user, None
 
@@ -135,7 +165,13 @@ async def dashboard(request: web.Request):
     if resp:
         return resp
     user = cast(Dict[str, Any], user)
-    print(f"SkynetV2 Web: Dashboard accessed - user: {user.get('username') if user else None}")
+    # Debug print gated
+    try:
+        web_debug = bool(await webiface.cog.config.web_debug())
+    except Exception:
+        web_debug = False
+    if web_debug:
+        print(f"SkynetV2 Web: Dashboard accessed - user: {user.get('username') if user else None}")
     perms = user.get('permissions', {})
     
     # Get overall bot statistics
@@ -143,6 +179,11 @@ async def dashboard(request: web.Request):
     accessible_guilds = len(perms.get('guilds', []))
     admin_guilds = len(perms.get('guild_admin', []))
     is_bot_owner = perms.get('bot_owner', False)
+    # Check if logs viewer enabled
+    try:
+        logs_enabled = bool(await webiface.cog.config.web_logs_enabled())
+    except Exception:
+        logs_enabled = True
     
     # Breadcrumb
     breadcrumb = """
@@ -306,6 +347,11 @@ async def dashboard(request: web.Request):
     # Bot owner actions
     owner_actions = ""
     if is_bot_owner:
+        logs_btn = """
+                    <button onclick="location.href='/logs'" class="btn-secondary">
+                        📋 View Logs
+                    </button>
+        """ if logs_enabled else ""
         owner_actions = f"""
         <div class="card">
             <div class="card-header">
@@ -319,9 +365,7 @@ async def dashboard(request: web.Request):
                     <button onclick="location.href='/bot-stats'" class="btn-secondary">
                         📊 Bot Statistics
                     </button>
-                    <button onclick="location.href='/logs'" class="btn-secondary">
-                        📋 View Logs
-                    </button>
+                    {logs_btn}
                 </div>
             </div>
         </div>
@@ -350,25 +394,33 @@ async def guild_dashboard(request: web.Request):
     user, resp = await _require_session(request)
     if resp: return resp
     user = cast(Dict[str, Any], user)
-    
-    print(f"SkynetV2 Web: Guild dashboard accessed by {user.get('username') if user else 'unknown'}")
-    
+    # Debug flag
+    try:
+        web_debug = bool(await webiface.cog.config.web_debug())
+    except Exception:
+        web_debug = False
+    if web_debug:
+        print(f"SkynetV2 Web: Guild dashboard accessed by {user.get('username') if user else 'unknown'}")
     try:
         gid = int(request.match_info['guild_id'])
-        print(f"SkynetV2 Web: Guild dashboard - parsed guild ID: {gid}")
+        if web_debug:
+            print(f"SkynetV2 Web: Guild dashboard - parsed guild ID: {gid}")
     except ValueError:
-        print(f"SkynetV2 Web: Guild dashboard - invalid guild ID format")
+        if web_debug:
+            print(f"SkynetV2 Web: Guild dashboard - invalid guild ID format")
         return web.Response(text='Invalid guild id', status=400)
     if str(gid) not in user.get('permissions', {}).get('guilds', []):
-        print(f"SkynetV2 Web: Guild dashboard - access denied for guild {gid}")
+        if web_debug:
+            print(f"SkynetV2 Web: Guild dashboard - access denied for guild {gid}")
         return web.Response(text='Forbidden', status=403)
     guild = webiface.cog.bot.get_guild(gid)
     if not guild:
-        print(f"SkynetV2 Web: Guild dashboard - guild not found: {gid}")
+        if web_debug:
+            print(f"SkynetV2 Web: Guild dashboard - guild not found: {gid}")
         return web.Response(text='Guild not found', status=404)
-    
     is_admin = str(gid) in user.get('permissions', {}).get('guild_admin', []) or user.get('permissions', {}).get('bot_owner')
-    print(f"SkynetV2 Web: Guild dashboard - successfully loaded guild: {guild.name} ({gid}), admin: {is_admin}")
+    if web_debug:
+        print(f"SkynetV2 Web: Guild dashboard - successfully loaded guild: {guild.name} ({gid}), admin: {is_admin}")
     status = await webiface.get_guild_status(guild)
     
     # Get current configuration
@@ -474,29 +526,37 @@ async def guild_config(request: web.Request):
     user, resp = await _require_session(request)
     if resp: return resp
     user = cast(Dict[str, Any], user)
-    
-    print(f"SkynetV2 Web: Guild config accessed by {user.get('username') if user else 'unknown'}")
-    
+    # Debug flag
+    try:
+        web_debug = bool(await webiface.cog.config.web_debug())
+    except Exception:
+        web_debug = False
+    if web_debug:
+        print(f"SkynetV2 Web: Guild config accessed by {user.get('username') if user else 'unknown'}")
     try:
         gid = int(request.match_info['guild_id'])
-        print(f"SkynetV2 Web: Guild config - parsed guild ID: {gid}")
+        if web_debug:
+            print(f"SkynetV2 Web: Guild config - parsed guild ID: {gid}")
     except ValueError:
-        print(f"SkynetV2 Web: Guild config - invalid guild ID format")
+        if web_debug:
+            print(f"SkynetV2 Web: Guild config - invalid guild ID format")
         return web.Response(text='Invalid guild id', status=400)
     if str(gid) not in user.get('permissions', {}).get('guilds', []):
-        print(f"SkynetV2 Web: Guild config - access denied for guild {gid}")
+        if web_debug:
+            print(f"SkynetV2 Web: Guild config - access denied for guild {gid}")
         return web.Response(text='Forbidden', status=403)
     guild = webiface.cog.bot.get_guild(gid)
     if not guild:
-        print(f"SkynetV2 Web: Guild config - guild not found: {gid}")
+        if web_debug:
+            print(f"SkynetV2 Web: Guild config - guild not found: {gid}")
         return web.Response(text='Guild not found', status=404)
     admin = str(gid) in user.get('permissions', {}).get('guild_admin', []) or user.get('permissions', {}).get('bot_owner')
-    
     if not admin:
-        print(f"SkynetV2 Web: Guild config - admin access required for guild {gid}")
+        if web_debug:
+            print(f"SkynetV2 Web: Guild config - admin access required for guild {gid}")
         return web.Response(text='Admin access required', status=403)
-    
-    print(f"SkynetV2 Web: Guild config - successfully loaded guild: {guild.name} ({gid})")
+    if web_debug:
+        print(f"SkynetV2 Web: Guild config - successfully loaded guild: {guild.name} ({gid})")
     
     # Get current configuration
     config = webiface.cog.config.guild(guild)
@@ -865,6 +925,101 @@ async def global_config(request: web.Request):
         key = (providers or {}).get(prov, {}).get('api_key')
         masked[prov] = (key[:8] + '***') if key else '(not set)'
 
+    # Read current web flags
+    web_debug = bool(await webiface.cog.config.web_debug())
+    logs_enabled = bool(await webiface.cog.config.web_logs_enabled())
+
+    # Simple owner-only edit form (providers)
+    form = """
+    <div class='card'>
+      <h2>Edit Global Providers</h2>
+      <form id='global-providers-form' action='/api/global/config/providers' method='POST'>
+        <div class='grid grid-cols-3'>
+          <div class='form-group'>
+            <label for='openai_api_key'>OpenAI API Key</label>
+            <input type='password' id='openai_api_key' name='openai_api_key' placeholder='Current: {openai_mask}' />
+          </div>
+          <div class='form-group'>
+            <label for='serp_api_key'>SerpAPI Key</label>
+            <input type='password' id='serp_api_key' name='serp_api_key' placeholder='Current: {serp_mask}' />
+          </div>
+          <div class='form-group'>
+            <label for='firecrawl_api_key'>Firecrawl Key</label>
+            <input type='password' id='firecrawl_api_key' name='firecrawl_api_key' placeholder='Current: {firecrawl_mask}' />
+          </div>
+        </div>
+        <h3>Self-hosted (optional)</h3>
+        <div class='grid grid-cols-3'>
+          <div class='form-group'>
+            <label for='ollama_base_url'>Ollama Base URL</label>
+            <input type='url' id='ollama_base_url' name='ollama_base_url' placeholder='http://localhost:11434/v1' />
+          </div>
+          <div class='form-group'>
+            <label for='lmstudio_base_url'>LM Studio Base URL</label>
+            <input type='url' id='lmstudio_base_url' name='lmstudio_base_url' placeholder='http://localhost:1234/v1' />
+          </div>
+          <div class='form-group'>
+            <label for='text_generation_webui_base_url'>Text Gen WebUI Base URL</label>
+            <input type='url' id='text_generation_webui_base_url' name='text_generation_webui_base_url' placeholder='http://localhost:5000/v1' />
+          </div>
+        </div>
+        <div class='grid grid-cols-3'>
+          <div class='form-group'>
+            <label for='localai_base_url'>LocalAI Base URL</label>
+            <input type='url' id='localai_base_url' name='localai_base_url' placeholder='http://localhost:8080/v1' />
+          </div>
+          <div class='form-group'>
+            <label for='localai_api_key'>LocalAI API Key (optional)</label>
+            <input type='password' id='localai_api_key' name='localai_api_key' placeholder='Enter API key' />
+          </div>
+          <div class='form-group'>
+            <label for='openai_compatible_base_url'>OpenAI Compatible Base URL</label>
+            <input type='url' id='openai_compatible_base_url' name='openai_compatible_base_url' placeholder='http://host:port/v1' />
+          </div>
+        </div>
+        <div class='grid grid-cols-3'>
+          <div class='form-group'>
+            <label for='openai_compatible_api_key'>OpenAI Compatible API Key</label>
+            <input type='password' id='openai_compatible_api_key' name='openai_compatible_api_key' placeholder='Enter API key' />
+          </div>
+          <div class='form-group'>
+            <label for='vllm_base_url'>vLLM Base URL</label>
+            <input type='url' id='vllm_base_url' name='vllm_base_url' placeholder='http://host:port/v1' />
+          </div>
+          <div class='form-group'>
+            <label for='vllm_api_key'>vLLM API Key</label>
+            <input type='password' id='vllm_api_key' name='vllm_api_key' placeholder='Enter API key' />
+          </div>
+        </div>
+        <div class='form-row'>
+          <button type='button' onclick="submitForm('global-providers-form')" class='btn-primary'>Save Global Providers</button>
+        </div>
+      </form>
+    </div>
+    """.format(openai_mask=masked.get('openai'), serp_mask=masked.get('serp'), firecrawl_mask=masked.get('firecrawl'))
+
+    # Global flags form (logs + debug)
+    flags_form = f"""
+    <div class='card'>
+      <h2>Web Options</h2>
+      <form id='global-web-flags-form' action='/api/global/config/web_flags' method='POST'>
+        <div class='grid grid-cols-3'>
+          <div class='form-group'>
+            <label for='web_logs_enabled'>Logs Viewer Enabled</label>
+            <input type='checkbox' id='web_logs_enabled' name='web_logs_enabled' {'checked' if logs_enabled else ''} />
+          </div>
+          <div class='form-group'>
+            <label for='web_debug'>Web Debug Prints</label>
+            <input type='checkbox' id='web_debug' name='web_debug' {'checked' if web_debug else ''} />
+          </div>
+        </div>
+        <div class='form-row'>
+          <button type='button' onclick="submitForm('global-web-flags-form')" class='btn-primary'>Save Options</button>
+        </div>
+      </form>
+    </div>
+    """
+
     body = f"""
     <h1>Global Configuration</h1>
     <div class='card'>
@@ -874,47 +1029,192 @@ async def global_config(request: web.Request):
             <li>SerpAPI: {masked.get('serp')}</li>
             <li>Firecrawl: {masked.get('firecrawl')}</li>
         </ul>
-        <p>Global provider editing UI will be added here.</p>
-        <button onclick="location.href='/dashboard'" class='btn-secondary'>← Back</button>
+        <button onclick=\"location.href='/dashboard'\" class='btn-secondary'>← Back</button>
     </div>
+    {form}
+    {flags_form}
     """
     return web.Response(text=_html_base('Global Config', body), content_type='text/html')
 
-async def guild_governance(request: web.Request):
-    """Redirect to the main guild config page for now (keeps link working)."""
+async def logs_page(request: web.Request):
     user, resp = await _require_session(request)
     if resp: return resp
-    try:
-        gid = int(request.match_info['guild_id'])
-    except ValueError:
-        return web.Response(text='Invalid guild id', status=400)
-    return web.HTTPFound(f"/guild/{gid}/config")
-
-async def guild_channels(request: web.Request):
     webiface = request.app['webiface']
-    user, resp = await _require_session(request)
-    if resp: return resp
-    try:
-        gid = int(request.match_info['guild_id'])
-    except ValueError:
-        return web.Response(text='Invalid guild id', status=400)
-    perms = user.get('permissions', {}) if isinstance(user, dict) else {}
-    if str(gid) not in perms.get('guilds', []):
-        return web.Response(text='Forbidden', status=403)
-    guild = webiface.cog.bot.get_guild(gid)
-    if not guild:
-        return web.Response(text='Guild not found', status=404)
-    body = f"""
-    <h1>Channel Settings - {guild.name}</h1>
+    logs_enabled = bool(await webiface.cog.config.web_logs_enabled())
+    if not logs_enabled:
+        body = """
+        <h1>Logs</h1>
+        <div class='card'>
+            <div class='card-body'>
+                <p>The logs viewer is disabled by the bot owner.</p>
+                <button onclick=\"location.href='/dashboard'\" class='btn-secondary'>← Back</button>
+            </div>
+        </div>
+        """
+        return web.Response(text=_html_base('Logs', body), content_type='text/html')
+    body = """
+    <h1>Logs</h1>
     <div class='card'>
-        <p>Channel configuration UI is coming soon.</p>
-        <button onclick=\"location.href='/guild/{gid}'\" class='btn-secondary'>← Back</button>
+        <div class='card-body'>
+            <p>View recent system and guild logs. Use filters below and click Refresh.</p>
+        </div>
     </div>
+    <div class='grid grid-cols-2'>
+      <div class='card'>
+        <div class='card-header'><h2>System Logs</h2></div>
+        <div class='card-body'>
+          <div class='form-row'>
+            <div class='form-group'>
+              <label for='sys-level'>Level</label>
+              <select id='sys-level'>
+                <option value=''>All</option>
+                <option value='INFO'>INFO</option>
+                <option value='WARNING'>WARNING</option>
+                <option value='ERROR'>ERROR</option>
+                <option value='DEBUG'>DEBUG</option>
+              </select>
+            </div>
+            <div class='form-group'>
+              <label for='sys-limit'>Limit</label>
+              <input id='sys-limit' type='number' min='10' max='500' value='50'/>
+            </div>
+            <div class='form-group'>
+              <button id='sys-refresh' class='btn-primary' type='button' onclick='loadSystemLogs()'>Refresh</button>
+            </div>
+          </div>
+          <div id='sys-results' style='overflow:auto;max-height:420px;'></div>
+        </div>
+      </div>
+      <div class='card'>
+        <div class='card-header'><h2>Guild Logs</h2></div>
+        <div class='card-body'>
+          <div class='form-row'>
+            <div class='form-group'>
+              <label for='guild-select'>Guild</label>
+              <select id='guild-select'></select>
+            </div>
+            <div class='form-group'>
+              <label for='guild-level'>Level</label>
+              <select id='guild-level'>
+                <option value=''>All</option>
+                <option value='INFO'>INFO</option>
+                <option value='WARNING'>WARNING</option>
+                <option value='ERROR'>ERROR</option>
+                <option value='DEBUG'>DEBUG</option>
+              </select>
+            </div>
+            <div class='form-group'>
+              <label for='guild-limit'>Limit</label>
+              <input id='guild-limit' type='number' min='10' max='500' value='50'/>
+            </div>
+            <div class='form-group'>
+              <button id='guild-refresh' class='btn-primary' type='button' onclick='loadGuildLogs()' disabled>Refresh</button>
+            </div>
+          </div>
+          <div id='guild-results' style='overflow:auto;max-height:420px;'></div>
+        </div>
+      </div>
+    </div>
+    <div class='form-row' style='margin-top:12px;'>
+      <button onclick=\"location.href='/dashboard'\" class='btn-secondary'>← Back</button>
+    </div>
+    <script>
+    function renderLogs(containerId, logs){
+      const container = document.getElementById(containerId);
+      if(!container) return;
+      container.innerHTML = '';
+      const table = document.createElement('table');
+      table.style.width = '100%';
+      table.style.borderCollapse = 'collapse';
+      const thead = document.createElement('thead');
+      const headRow = document.createElement('tr');
+      ['Time','Level','Message','Guild','Channel','User'].forEach(h=>{
+        const th = document.createElement('th');
+        th.textContent = h;
+        th.style.textAlign='left';
+        th.style.borderBottom='1px solid var(--border)';
+        th.style.padding='6px 8px';
+        headRow.appendChild(th);
+      });
+      thead.appendChild(headRow);
+      table.appendChild(thead);
+      const tbody = document.createElement('tbody');
+      logs.forEach(e=>{
+        const tr = document.createElement('tr');
+        function td(text){
+          const d = document.createElement('td');
+          d.textContent = text==null ? '' : String(text);
+          d.style.padding='6px 8px';
+          d.style.borderBottom='1px solid rgba(255,255,255,0.04)';
+          return d;
+        }
+        const t = e.timestamp ? new Date(e.timestamp).toLocaleString() : '';
+        tr.appendChild(td(t));
+        tr.appendChild(td(e.level || ''));
+        tr.appendChild(td(e.message || ''));
+        tr.appendChild(td(e.guild_id || ''));
+        tr.appendChild(td(e.channel_id || ''));
+        tr.appendChild(td(e.user_id || ''));
+        tbody.appendChild(tr);
+      });
+      table.appendChild(tbody);
+      container.appendChild(table);
+    }
+    async function loadSystemLogs(){
+      const level = document.getElementById('sys-level').value;
+      const limit = document.getElementById('sys-limit').value || '50';
+      const url = '/api/logs/system?limit=' + encodeURIComponent(limit) + (level ? '&level=' + encodeURIComponent(level) : '');
+      const btn = document.getElementById('sys-refresh'); btn.disabled = true;
+      try{
+        const res = await fetch(url); const data = await res.json();
+        renderLogs('sys-results', (data && data.logs) ? data.logs : []);
+      }catch(e){
+        renderLogs('sys-results', []);
+      }finally{ btn.disabled = false; }
+    }
+    async function loadGuilds(){
+      try{
+        const res = await fetch('/api/guilds'); const data = await res.json();
+        const sel = document.getElementById('guild-select'); sel.innerHTML='';
+        if(data && data.guilds && data.guilds.length){
+          data.guilds.forEach(g=>{
+            const opt = document.createElement('option'); opt.value = g.id; opt.textContent = g.name + (g.admin ? ' (admin)' : '');
+            sel.appendChild(opt);
+          });
+          document.getElementById('guild-refresh').disabled = false;
+        } else {
+          const opt = document.createElement('option'); opt.value = ''; opt.textContent = 'No accessible guilds';
+          sel.appendChild(opt);
+          document.getElementById('guild-refresh').disabled = true;
+        }
+      }catch(e){
+        const sel = document.getElementById('guild-select'); sel.innerHTML='';
+        const opt = document.createElement('option'); opt.value = ''; opt.textContent = 'Failed to load';
+        sel.appendChild(opt);
+        document.getElementById('guild-refresh').disabled = true;
+      }
+    }
+    async function loadGuildLogs(){
+      const gid = document.getElementById('guild-select').value;
+      const level = document.getElementById('guild-level').value;
+      const limit = document.getElementById('guild-limit').value || '50';
+      if(!gid){ renderLogs('guild-results', []); return; }
+      const url = '/api/logs/guild/' + encodeURIComponent(gid) + '?limit=' + encodeURIComponent(limit) + (level ? '&level=' + encodeURIComponent(level) : '');
+      const btn = document.getElementById('guild-refresh'); btn.disabled = true;
+      try{
+        const res = await fetch(url); const data = await res.json();
+        if(data && data.logs){ renderLogs('guild-results', data.logs); } else { renderLogs('guild-results', []); }
+      }catch(e){ renderLogs('guild-results', []); } finally { btn.disabled = false; }
+    }
+    document.addEventListener('DOMContentLoaded', function(){
+      loadGuilds();
+      loadSystemLogs();
+    });
+    </script>
     """
-    return web.Response(text=_html_base('Channels', body), content_type='text/html')
+    return web.Response(text=_html_base('Logs', body), content_type='text/html')
 
 async def guild_prompts(request: web.Request):
-    webiface = request.app['webiface']
     user, resp = await _require_session(request)
     if resp: return resp
     try:
@@ -924,7 +1224,6 @@ async def guild_prompts(request: web.Request):
     perms = user.get('permissions', {}) if isinstance(user, dict) else {}
     if str(gid) not in perms.get('guilds', []):
         return web.Response(text='Forbidden', status=403)
-    # Redirect to the unified prompts UI with guild context
     return web.HTTPFound(f"/prompts?guild={gid}")
 
 async def guild_usage(request: web.Request):
@@ -951,6 +1250,72 @@ async def guild_usage(request: web.Request):
     """
     return web.Response(text=_html_base('Usage', body), content_type='text/html')
 
+# New minimal handlers to satisfy routes
+async def guild_governance(request: web.Request):
+    user, resp = await _require_session(request)
+    if resp: return resp
+    try:
+        gid = int(request.match_info['guild_id'])
+    except ValueError:
+        return web.Response(text='Invalid guild id', status=400)
+    perms = user.get('permissions', {}) if isinstance(user, dict) else {}
+    if str(gid) not in perms.get('guilds', []):
+        return web.Response(text='Forbidden', status=403)
+    # Redirect to full config where governance is managed
+    return web.HTTPFound(f"/guild/{gid}/config")
+
+async def guild_channels(request: web.Request):
+    webiface = request.app['webiface']
+    user, resp = await _require_session(request)
+    if resp: return resp
+    try:
+        gid = int(request.match_info['guild_id'])
+    except ValueError:
+        return web.Response(text='Invalid guild id', status=400)
+    perms = user.get('permissions', {}) if isinstance(user, dict) else {}
+    is_admin = (str(gid) in perms.get('guild_admin', [])) or perms.get('bot_owner', False)
+    if not is_admin:
+        return web.Response(text='Admin access required', status=403)
+    guild = webiface.cog.bot.get_guild(gid)
+    if not guild:
+        return web.Response(text='Guild not found', status=404)
+
+    body = f"""
+    <h1>Channel Overrides - {guild.name}</h1>
+    <div class='card'>
+      <p>Set per-channel listening behavior. Submit one channel at a time.</p>
+      <form id='channel-listening-form' action='/api/guild/{gid}/config/channel_listening' method='POST'>
+        <div class='grid grid-cols-3'>
+          <div class='form-group'>
+            <label for='channel_id'>Channel ID</label>
+            <input type='text' id='channel_id' name='channel_id' placeholder='123456789012345678' />
+          </div>
+          <div class='form-group'>
+            <label for='enabled'>Enabled</label>
+            <input type='checkbox' id='enabled' name='enabled' />
+          </div>
+          <div class='form-group'>
+            <label for='mode'>Mode</label>
+            <select id='mode' name='mode'>
+              <option value='mention'>Mention</option>
+              <option value='keyword'>Keyword</option>
+              <option value='all'>All</option>
+            </select>
+          </div>
+        </div>
+        <div class='form-group'>
+          <label for='keywords'>Keywords (comma)</label>
+          <input type='text' id='keywords' name='keywords' placeholder='ai, bot, helper' />
+        </div>
+        <div class='form-row'>
+          <button type='button' onclick="submitForm('channel-listening-form')" class='btn-primary'>Save Channel Settings</button>
+          <button type='button' onclick=\"location.href='/guild/{gid}'\" class='btn-secondary'>← Back</button>
+        </div>
+      </form>
+    </div>
+    """
+    return web.Response(text=_html_base('Channel Overrides', body), content_type='text/html')
+
 async def guild_test(request: web.Request):
     webiface = request.app['webiface']
     user, resp = await _require_session(request)
@@ -965,14 +1330,29 @@ async def guild_test(request: web.Request):
     guild = webiface.cog.bot.get_guild(gid)
     if not guild:
         return web.Response(text='Guild not found', status=404)
+
     body = f"""
-    <h1>Test - {guild.name}</h1>
+    <h1>Test AI Chat - {guild.name}</h1>
     <div class='card'>
-        <p>Interactive chat test UI is coming soon.</p>
-        <button onclick=\"location.href='/guild/{gid}'\" class='btn-secondary'>← Back</button>
+      <form id='chat-test-form' action='/api/guild/{gid}/chat_test' method='POST'>
+        <div class='form-group'>
+          <label for='message'>Message</label>
+          <input type='text' id='message' name='message' placeholder='Say hello' />
+        </div>
+        <div class='form-row'>
+          <button type='button' onclick="sendChatTest('chat-test-form','chat-result','chat-text')" class='btn-primary'>Send</button>
+          <button type='button' onclick=\"location.href='/guild/{gid}'\" class='btn-secondary'>← Back</button>
+        </div>
+      </form>
+    </div>
+    <div id='chat-result' class='card' style='display:none;'>
+      <div class='card-body'>
+        <strong>Response:</strong>
+        <pre id='chat-text' style='white-space:pre-wrap'></pre>
+      </div>
     </div>
     """
-    return web.Response(text=_html_base('Test', body), content_type='text/html')
+    return web.Response(text=_html_base('Test Chat', body), content_type='text/html')
 
 async def bot_stats(request: web.Request):
     webiface = request.app['webiface']
@@ -981,27 +1361,20 @@ async def bot_stats(request: web.Request):
     perms = user.get('permissions', {}) if isinstance(user, dict) else {}
     if not perms.get('bot_owner', False):
         return web.Response(text='Forbidden', status=403)
-    total_guilds = len(webiface.cog.bot.guilds)
+    bot = webiface.cog.bot
+    total_guilds = len(bot.guilds)
+    total_members = sum(g.member_count or 0 for g in bot.guilds)
     body = f"""
     <h1>Bot Statistics</h1>
     <div class='card'>
-        <p>Total guilds: <strong>{total_guilds}</strong></p>
-        <button onclick=\"location.href='/dashboard'\" class='btn-secondary'>← Back</button>
+      <ul>
+        <li>Total guilds: {total_guilds}</li>
+        <li>Estimated total members: {total_members}</li>
+      </ul>
+      <button onclick=\"location.href='/dashboard'\" class='btn-secondary'>← Back</button>
     </div>
     """
     return web.Response(text=_html_base('Bot Stats', body), content_type='text/html')
-
-async def logs_page(request: web.Request):
-    user, resp = await _require_session(request)
-    if resp: return resp
-    body = """
-    <h1>Logs</h1>
-    <div class='card'>
-        <p>Logs viewer is coming soon.</p>
-        <button onclick=\"location.href='/dashboard'\" class='btn-secondary'>← Back</button>
-    </div>
-    """
-    return web.Response(text=_html_base('Logs', body), content_type='text/html')
 
 def setup(webiface: Any):
     """Register currently implemented page routes."""

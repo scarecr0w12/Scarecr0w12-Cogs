@@ -3,6 +3,9 @@ from __future__ import annotations
 from aiohttp import web
 from aiohttp_session import get_session
 from typing import Any, Dict, Tuple
+# Add provider types for chat test
+from ..api.base import ChatMessage, ChatParams, ProviderError
+from ..logging_system import get_system_logs as _get_system_logs, get_guild_logs as _get_guild_logs
 
 async def _require_session(request: web.Request):
     from aiohttp_session import get_session
@@ -268,6 +271,38 @@ async def handle_listening_config(request: web.Request):
     except Exception:
         return web.json_response({'error': 'update_failed'}, status=500)
 
+# ---- Channel listening (per-channel) config ----
+async def handle_channel_listening_config(request: web.Request):
+    user, resp, guild, gid, is_admin = await _get_guild_with_access(request)
+    if resp:
+        return resp
+    if not is_admin:
+        return web.json_response({'error': 'forbidden'}, status=403)
+    payload = await request.json()
+    # Validate inputs
+    try:
+        channel_id = int(str(payload.get('channel_id')))
+    except (TypeError, ValueError):
+        return web.json_response({'error': 'invalid_channel_id'}, status=400)
+    enabled = bool(payload.get('enabled', False))
+    mode = str(payload.get('mode') or 'mention')
+    if mode not in ['mention', 'keyword', 'all']:
+        mode = 'mention'
+    keywords = _csv_to_list(str(payload.get('keywords') or ''))
+    config = request.app['webiface'].cog.config.guild(guild)
+    try:
+        async with config.channel_listening() as ch_cfg:
+            if not isinstance(ch_cfg, dict):
+                ch_cfg = {}
+            ch = ch_cfg.get(str(channel_id), {}) if isinstance(ch_cfg.get(str(channel_id)), dict) else {}
+            ch['enabled'] = enabled
+            ch['mode'] = mode
+            ch['keywords'] = keywords
+            ch_cfg[str(channel_id)] = ch
+        return web.json_response({'success': True})
+    except Exception:
+        return web.json_response({'error': 'update_failed'}, status=500)
+
 # ---- Smart replies config ----
 async def handle_smart_replies_config(request: web.Request):
     user, resp, guild, gid, is_admin = await _get_guild_with_access(request)
@@ -381,6 +416,165 @@ async def handle_governance_config(request: web.Request):
     except Exception:
         return web.json_response({'error': 'update_failed'}, status=500)
 
+# ---- Chat test (simple, non-streaming) ----
+async def handle_chat_test(request: web.Request):
+    user, resp, guild, gid, is_admin = await _get_guild_with_access(request)
+    if resp:
+        return resp
+    payload = await request.json()
+    prompt = str(payload.get('message') or payload.get('prompt') or '').strip()
+    if not prompt:
+        return web.json_response({'error': 'missing_message'}, status=400)
+
+    webiface = request.app['webiface']
+    try:
+        provider_name, model_dict, provider_config = await webiface.cog.resolve_provider_and_model(guild)
+        model_name = model_dict.get('name') if isinstance(model_dict, dict) else str(model_dict)
+        provider = webiface.cog.build_provider(provider_name, provider_config)
+
+        # Build ChatParams from guild/global config
+        gparams = await webiface.cog.config.guild(guild).params()
+        if not gparams:
+            gparams = await webiface.cog.config.params()
+        params = ChatParams(
+            temperature=float(gparams.get('temperature', 0.7) or 0.7),
+            max_tokens=int(gparams.get('max_tokens', 512) or 512),
+            top_p=float(gparams.get('top_p', 1.0) or 1.0),
+        )
+        messages = [ChatMessage(role='user', content=prompt)]
+
+        # Collect non-streaming response
+        chunks: list[str] = []
+        async for part in provider.chat(model=model_name, messages=messages, params=params, stream=False):
+            if part:
+                chunks.append(str(part))
+        text = (''.join(chunks)).strip() or '(no response)'
+        if len(text) > 2000:
+            text = text[:2000]
+        return web.json_response({'success': True, 'text': text})
+    except ProviderError:
+        return web.json_response({'error': 'provider_error'}, status=502)
+    except Exception:
+        return web.json_response({'error': 'request_failed'}, status=500)
+
+# ---- Global providers config (owner-only) ----
+async def handle_global_providers_config(request: web.Request):
+    user, resp = await _require_session(request)
+    if resp:
+        return resp
+    perms = user.get('permissions', {}) if isinstance(user, dict) else {}
+    if not perms.get('bot_owner', False):
+        return web.json_response({'error': 'forbidden'}, status=403)
+    payload = await request.json()
+    conf = request.app['webiface'].cog.config
+    cloud_keys = ['openai', 'serp', 'firecrawl', 'anthropic', 'groq', 'gemini']
+    local_fields = {
+        'ollama': ['base_url'],
+        'lmstudio': ['base_url'],
+        'localai': ['base_url', 'api_key'],
+        'vllm': ['base_url', 'api_key'],
+        'text_generation_webui': ['base_url'],
+        'openai_compatible': ['base_url', 'api_key']
+    }
+    try:
+        async with conf.providers() as prov:
+            if not isinstance(prov, dict):
+                prov = {}
+            # Cloud/web providers
+            for name in cloud_keys:
+                key_field = f"{name}_api_key"
+                val = payload.get(key_field)
+                if val is None or val == '':
+                    continue
+                if name not in prov or not isinstance(prov[name], dict):
+                    prov[name] = {}
+                prov[name]['api_key'] = str(val)
+            # Local/self-hosted providers
+            for name, fields in local_fields.items():
+                for field in fields:
+                    form_key = f"{name}_{field}"
+                    val = payload.get(form_key)
+                    if val is None or val == '':
+                        continue
+                    if name not in prov or not isinstance(prov[name], dict):
+                        prov[name] = {}
+                    prov[name][field] = str(val)
+        return web.json_response({'success': True})
+    except Exception:
+        return web.json_response({'error': 'update_failed'}, status=500)
+
+# ---- Global web flags (owner-only) ----
+async def handle_global_web_flags(request: web.Request):
+    user, resp = await _require_session(request)
+    if resp:
+        return resp
+    perms = user.get('permissions', {}) if isinstance(user, dict) else {}
+    if not perms.get('bot_owner', False):
+        return web.json_response({'error': 'forbidden'}, status=403)
+    payload = await request.json()
+    conf = request.app['webiface'].cog.config
+    try:
+        # Normalize checkbox values: can be bool or 'on'
+        logs_enabled = payload.get('web_logs_enabled')
+        debug_enabled = payload.get('web_debug')
+        def _to_bool(v):
+            if isinstance(v, bool): return v
+            if isinstance(v, str):
+                return v.lower() in ('1','true','yes','on','checked')
+            return bool(v)
+        await conf.web_logs_enabled.set(_to_bool(logs_enabled))
+        await conf.web_debug.set(_to_bool(debug_enabled))
+        return web.json_response({'success': True})
+    except Exception:
+        return web.json_response({'error': 'update_failed'}, status=500)
+
+# ---- Logs (JSON) ----
+async def handle_system_logs(request: web.Request):
+    user, resp = await _require_session(request)
+    if resp:
+        return resp
+    # Respect global flag to disable logs API entirely
+    logs_enabled = bool(await request.app['webiface'].cog.config.web_logs_enabled())
+    if not logs_enabled:
+        return web.json_response({'error': 'disabled'}, status=403)
+    # Optional: restrict to bot owners only; keep open to logged-in for now
+    try:
+        limit = int(request.query.get('limit', '50'))
+    except (TypeError, ValueError):
+        limit = 50
+    level = request.query.get('level')
+    logs = await _get_system_logs(limit=limit)
+    if level:
+        logs = [e for e in logs if getattr(e, 'level', None) == level]
+    data = [e.to_dict() if hasattr(e, 'to_dict') else e for e in logs]
+    return web.json_response({'logs': data})
+
+async def handle_guild_logs(request: web.Request):
+    user, resp = await _require_session(request)
+    if resp:
+        return resp
+    # Respect global flag
+    logs_enabled = bool(await request.app['webiface'].cog.config.web_logs_enabled())
+    if not logs_enabled:
+        return web.json_response({'error': 'disabled'}, status=403)
+    perms = user.get('permissions', {}) if isinstance(user, dict) else {}
+    try:
+        gid = int(request.match_info['guild_id'])
+    except (KeyError, ValueError):
+        return web.json_response({'error': 'invalid_guild_id'}, status=400)
+    if not (perms.get('bot_owner', False) or (str(gid) in perms.get('guilds', []))):
+        return web.json_response({'error': 'forbidden'}, status=403)
+    try:
+        limit = int(request.query.get('limit', '50'))
+    except (TypeError, ValueError):
+        limit = 50
+    level = request.query.get('level')
+    logs = await _get_guild_logs(guild_id=gid, limit=limit)
+    if level:
+        logs = [e for e in logs if getattr(e, 'level', None) == level]
+    data = [e.to_dict() if hasattr(e, 'to_dict') else e for e in logs]
+    return web.json_response({'logs': data})
+
 # Register routes
 def setup(webiface: Any):
     app = webiface.app
@@ -389,6 +583,9 @@ def setup(webiface: Any):
     # ...existing routes...
     r.add_get('/api/guilds', guilds)
     r.add_get('/api/status/{guild_id}', guild_status)
+    # Logs
+    r.add_get('/api/logs/system', handle_system_logs)
+    r.add_get('/api/logs/guild/{guild_id}', handle_guild_logs)
     # New POST routes
     r.add_post('/api/guild/{guild_id}/toggle', handle_toggle)
     r.add_post('/api/guild/{guild_id}/config/providers', handle_providers_config)
@@ -396,6 +593,12 @@ def setup(webiface: Any):
     r.add_post('/api/guild/{guild_id}/config/params', handle_params_config)
     r.add_post('/api/guild/{guild_id}/config/rate_limits', handle_rate_limits_config)
     r.add_post('/api/guild/{guild_id}/config/listening', handle_listening_config)
+    r.add_post('/api/guild/{guild_id}/config/channel_listening', handle_channel_listening_config)
     r.add_post('/api/guild/{guild_id}/config/smart_replies', handle_smart_replies_config)
     r.add_post('/api/guild/{guild_id}/config/auto_web_search', handle_auto_web_search_config)
     r.add_post('/api/guild/{guild_id}/config/governance', handle_governance_config)
+    # Chat test
+    r.add_post('/api/guild/{guild_id}/chat_test', handle_chat_test)
+    # Global config
+    r.add_post('/api/global/config/providers', handle_global_providers_config)
+    r.add_post('/api/global/config/web_flags', handle_global_web_flags)

@@ -42,6 +42,9 @@ def register_config(cog) -> Config:
         "web_host": "localhost",
         "web_port": 8080,
         "web_session_key": None,  # Auto-generated encryption key
+        # Web debugging and logs feature flags
+        "web_debug": False,              # Controls verbose console prints from web handlers
+        "web_logs_enabled": True,        # Controls Logs viewer and logs APIs
         # Prompt templates (global scope): name -> {content:str, variables:list[str], created:int, updated:int, scope:'global'}
         "prompts": {},
         # System-level prompts for different contexts (enhanced with markdown formatting)

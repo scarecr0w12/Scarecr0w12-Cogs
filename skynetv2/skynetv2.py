@@ -29,9 +29,11 @@ from .web.server import WebServer  # modular web server
 class SkynetV2(ToolsMixin, MemoryMixin, StatsMixin, ListenerMixin, OrchestrationMixin, commands.Cog):
     """SkynetV2: AI assistant for Red-DiscordBot (MVP)."""
 
-    # Slash command groups (class-level) so Red registers them under /skynet and /skynet memory
+    # Slash command groups (class-level) — keep /skynet, add /ai for compatibility
     ai_slash = app_commands.Group(name="skynet", description="AI assistant commands")
     mem_group = app_commands.Group(name="memory", description="Memory controls", parent=ai_slash)
+    ai_compat = app_commands.Group(name="ai", description="AI assistant commands (compat)")
+    ai_mem_compat = app_commands.Group(name="memory", description="Memory controls", parent=ai_compat)
 
     def __init__(self, bot):
         self.bot = bot
@@ -839,8 +841,9 @@ class SkynetV2(ToolsMixin, MemoryMixin, StatsMixin, ListenerMixin, Orchestration
         await self._gov_update(ctx.guild, lambda g: g.setdefault("budget", {}).update({"per_user_daily_tokens": max(0, int(per_user_daily_tokens))}))
         await ctx.tick()
 
-    # Register slash chat under the slash command group, not the prefix group
+    # Register chat under both /skynet and /ai
     @ai_slash.command(name="chat", description="Chat once with the configured model")
+    @ai_compat.command(name="chat", description="Chat once with the configured model")
     @app_commands.describe(message="Your message to the assistant", stream="Stream partial output (edits message)")
     async def slash_chat(self, interaction: discord.Interaction, message: str, stream: Optional[bool] = False):
         assert interaction.guild is not None
@@ -1000,6 +1003,7 @@ class SkynetV2(ToolsMixin, MemoryMixin, StatsMixin, ListenerMixin, Orchestration
     # Memory scope controls (slash)
     # ----------------
     @mem_group.command(name="scope", description="Enable/disable per-user memory and set limits")
+    @ai_mem_compat.command(name="scope", description="Enable/disable per-user memory and set limits")
     @app_commands.describe(per_user_enabled="Enable per-user memory", per_user_limit="Pairs to keep per user per channel", merge_strategy="append, interleave, or user_first")
     @app_commands.choices(merge_strategy=[
         app_commands.Choice(name="append", value="append"),

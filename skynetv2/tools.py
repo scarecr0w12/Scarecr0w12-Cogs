@@ -90,6 +90,25 @@ class ToolsMixin:
         if tool and gov:
             allow = gov.get("tools", {}).get("allow") or []
             deny = gov.get("tools", {}).get("deny") or []
+            allow_roles = set((gov.get("tools", {}).get("allow_roles") or []))
+            deny_roles = set((gov.get("tools", {}).get("deny_roles") or []))
+            allow_channels = set((gov.get("tools", {}).get("allow_channels") or []))
+            deny_channels = set((gov.get("tools", {}).get("deny_channels") or []))
+            # Channel gate
+            if hasattr(self, "_current_channel_id") and self._current_channel_id is not None:
+                ch_id = int(self._current_channel_id)
+                if deny_channels and ch_id in deny_channels:
+                    return f"Tool '{tool}' is denied in this channel by governance policy."
+                if allow_channels and ch_id not in allow_channels:
+                    return f"Tool '{tool}' is not allowed in this channel by governance policy."
+            # Role gate
+            if member:
+                member_role_ids = {r.id for r in member.roles}
+                if deny_roles and (member_role_ids & deny_roles):
+                    return f"Tool '{tool}' is denied for your role by governance policy."
+                if allow_roles and not (member_role_ids & allow_roles):
+                    return f"Tool '{tool}' is not allowed for your role by governance policy."
+            # Global allow/deny
             if deny and tool in deny:
                 return f"Tool '{tool}' is denied by governance policy."
             if allow and tool not in allow:

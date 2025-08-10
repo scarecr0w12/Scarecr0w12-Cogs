@@ -95,22 +95,20 @@ Default search provider:
 }
 ```
 
-### Web Options
-Owner-controlled web interface flags:
+### Web Interface Options
+Global flags controlling the built-in Web UI behavior:
 
 ```json
 {
-  "web_logs_enabled": true,
-  "web_debug": false
+  "web_debug": false,
+  "web_logs_enabled": true
 }
 ```
 
-- web_logs_enabled: When false, hides functionality of the Logs viewer and disables the JSON logs APIs (`/api/logs/*`). The /logs page will show a disabled message.
-- web_debug: Gates verbose print() statements in the web handlers to keep console output clean in production.
+- web_debug: When true, enables additional web debug prints in the server logs. Default: false.
+- web_logs_enabled: When false, hides/disables the Logs page and blocks logs JSON APIs. Default: true.
 
-Management:
-- Web UI: Global Configuration → Web Options (posts to `POST /api/global/config/web_flags`)
-- Defaults: logs enabled, debug off
+These can be changed from the Global Config page in the Web UI (Web Options card) or via config editing.
 
 ## Guild Configuration
 
@@ -157,28 +155,6 @@ Channel-specific AI behavior overrides:
 - `mention`: Respond only when bot is mentioned
 - `keyword`: Respond to messages containing specified keywords  
 - `all`: Respond to all messages in the channel
-
-Web UI
-- Navigate: Dashboard → Guild → Channel Settings
-- Fields per channel: Enable, Mode (mention/keyword/all), Keywords (comma separated)
-- Permissions: Admin-only (read-only for non-admins)
-- Persistence: Saves to `guild.channel_listening[channel_id]`
-
-JSON API
-- Endpoint: `POST /api/guild/{guild_id}/config/channel_listening`
-- Body:
-```json
-{
-  "channel_id": 123456789,
-  "enabled": true,
-  "mode": "keyword",
-  "keywords": "bot, ai, help"
-}
-```
-- Notes:
-  - `keywords` may be provided as a comma-separated string; server normalizes to list
-  - Requires OAuth session and guild admin permissions
-  - Updates only the specified channel entry
 
 ### Global Listening
 Default listening behavior for all channels:

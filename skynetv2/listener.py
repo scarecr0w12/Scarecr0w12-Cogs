@@ -136,104 +136,108 @@ class ListenerMixin:
         
         print(f"[SkynetV2 Listener] Sending message to AI provider...")
         try:
-            # Clean up content for mentions
-            processed_content = content
-            if mode == "mention" and self.bot.user:
-                processed_content = ConversationManager.extract_mention_content(message, self.bot.user)
-            
-            # Auto web search integration for passive listening
-            from .auto_web_search import AutoWebSearchIntegration, AutoSearchCooldownManager
-            if not hasattr(self, '_auto_search_integration'):
-                self._auto_search_integration = AutoWebSearchIntegration(self)
-            if not hasattr(self, '_auto_search_cooldowns'):
-                self._auto_search_cooldowns = AutoSearchCooldownManager()
-            
-            auto_search_config = await self.config.guild(guild).auto_web_search()
-            search_context = ""
-            
-            if auto_search_config.get('enabled', False):
-                # Check if current listening mode is allowed for auto search
-                if mode in auto_search_config.get('allowed_modes', ['mention', 'keyword', 'all']):
-                    # Check user cooldown
-                    user_id = str(message.author.id)
-                    cooldown_seconds = auto_search_config.get('cooldown_seconds', 60)
-                    
-                    if self._auto_search_cooldowns.can_search(user_id, cooldown_seconds):
-                        # Check if message should trigger search
-                        should_search, search_reason = self._auto_search_integration.should_trigger_search(
-                            processed_content, auto_search_config
-                        )
+            # Keep typing indicator visible until we send the response
+            async with message.channel.typing():
+                from typing import Any, cast
+                s = cast(Any, self)
+                # Clean up content for mentions
+                processed_content = content
+                if mode == "mention" and getattr(s, 'bot', None) and getattr(s.bot, 'user', None):
+                    processed_content = ConversationManager.extract_mention_content(message, s.bot.user)
+                
+                # Auto web search integration for passive listening
+                from .auto_web_search import AutoWebSearchIntegration, AutoSearchCooldownManager
+                if not hasattr(s, '_auto_search_integration'):
+                    s._auto_search_integration = AutoWebSearchIntegration(self)
+                if not hasattr(s, '_auto_search_cooldowns'):
+                    s._auto_search_cooldowns = AutoSearchCooldownManager()
+                
+                auto_search_config = await s.config.guild(guild).auto_web_search()
+                search_context = ""
+                
+                if auto_search_config.get('enabled', False):
+                    # Check if current listening mode is allowed for auto search
+                    if mode in auto_search_config.get('allowed_modes', ['mention', 'keyword', 'all']):
+                        # Check user cooldown
+                        user_id = str(message.author.id)
+                        cooldown_seconds = auto_search_config.get('cooldown_seconds', 60)
                         
-                        if should_search:
-                            # Check message length requirement
-                            min_length = auto_search_config.get('min_message_length', 10)
-                            if len(processed_content.strip()) >= min_length:
-                                try:
-                                    # Perform auto search
-                                    search_data = await self._auto_search_integration.perform_auto_search(
-                                        processed_content, guild, auto_search_config
-                                    )
-                                    
-                                    if search_data:
-                                        # Format search results as context
-                                        search_context = self._auto_search_integration.format_search_context(
-                                            search_data, processed_content
+                        if s._auto_search_cooldowns.can_search(user_id, cooldown_seconds):
+                            # Check if message should trigger search
+                            should_search, search_reason = s._auto_search_integration.should_trigger_search(
+                                processed_content, auto_search_config
+                            )
+                            
+                            if should_search:
+                                # Check message length requirement
+                                min_length = auto_search_config.get('min_message_length', 10)
+                                if len(processed_content.strip()) >= min_length:
+                                    try:
+                                        # Perform auto search
+                                        search_data = await s._auto_search_integration.perform_auto_search(
+                                            processed_content, guild, auto_search_config
                                         )
                                         
-                                        # Record successful search for cooldown
-                                        self._auto_search_cooldowns.record_search(user_id)
-                                        
-                                        print(f"[SkynetV2 Listener] Auto web search triggered: {search_reason}")
-                                        
-                                except Exception as e:
-                                    # Log error but don't break listener
-                                    print(f"[SkynetV2 Listener] Auto search error: {e}")
-            
-            # Always use conversation memory for consistent behavior across all modes
-            print(f"[SkynetV2 Listener] Building conversation context with memory...")
-            messages = await self._memory_build_context(guild, message.channel.id, message.author)
-            
-            # Add search context if available
-            if search_context:
-                messages.append(ChatMessage("system", search_context))
-            
-            # Add current message to context
-            messages.append(ChatMessage("user", processed_content or "Hello"))
-            
-            # Send to AI provider
-            chunks = []
-            async for chunk in provider.chat(model=model["name"] if isinstance(model, dict) else str(model), messages=messages):
-                chunks.append(chunk)
-            text = "".join(chunks) or "(no output)"
-            
-            # Log the AI request with usage info
-            last_usage = getattr(provider, "get_last_usage", lambda: None)()
-            model_name = model["name"] if isinstance(model, dict) else str(model)
-            tokens_used = last_usage.get('total_tokens', 0) if last_usage else 0
-            await log_ai_request(guild, message.author, message.channel, provider_name, model_name, tokens_used)
-            
-            # Update usage statistics
-            if last_usage:
-                async with self.config.guild(guild).usage as usage:
-                    t = usage.setdefault("tokens", {"prompt": 0, "completion": 0, "total": 0})
-                    t["prompt"] = int(t.get("prompt", 0)) + int(last_usage.get("prompt", 0))
-                    t["completion"] = int(t.get("completion", 0)) + int(last_usage.get("completion", 0))
-                    t["total"] = int(t.get("total", 0)) + int(last_usage.get("total", 0))
-                    pu = usage.setdefault("per_user", {})
-                    pc = usage.setdefault("per_channel", {})
-                    u = pu.setdefault(str(message.author.id), {"last_used": int(time.time()), "count_1m": 1, "window_start": int(time.time()), "total": 1, "tokens_total": 0})
-                    c = pc.setdefault(str(message.channel.id), {"count_1m": 1, "window_start": int(time.time()), "total": 1, "tokens_total": 0})
-                    u["tokens_total"] = int(u.get("tokens_total", 0)) + int(last_usage.get("total", 0))
-                    c["tokens_total"] = int(c.get("tokens_total", 0)) + int(last_usage.get("total", 0))
-            
-            # Store conversation in memory (always, for all modes)
-            print(f"[SkynetV2 Listener] Storing conversation in memory...")
-            await self._memory_remember(guild, message.channel.id, processed_content or "Hello", text)
-            
-            # Send response using smart message handling
-            print(f"[SkynetV2 Listener] Sending response with smart chunking: {len(text)} characters...")
-            sent_messages = await MessageChunker.send_long_message(message.channel, text, reference=message)
-            print(f"[SkynetV2 Listener] Response sent as {len(sent_messages)} message(s)!")
+                                        if search_data:
+                                            # Format search results as context
+                                            search_context = s._auto_search_integration.format_search_context(
+                                                search_data, processed_content
+                                            )
+                                            
+                                            # Record successful search for cooldown
+                                            s._auto_search_cooldowns.record_search(user_id)
+                                            
+                                            print(f"[SkynetV2 Listener] Auto web search triggered: {search_reason}")
+                                            
+                                    except Exception as e:
+                                        # Log error but don't break listener
+                                        print(f"[SkynetV2 Listener] Auto search error: {e}")
+                
+                # Always use conversation memory for consistent behavior across all modes
+                print(f"[SkynetV2 Listener] Building conversation context with memory...")
+                messages = await s._memory_build_context(guild, message.channel.id, message.author)
+                
+                # Add search context if available
+                if search_context:
+                    messages.append(ChatMessage("system", search_context))
+                
+                # Add current message to context
+                messages.append(ChatMessage("user", processed_content or "Hello"))
+                
+                # Send to AI provider
+                chunks = []
+                async for chunk in provider.chat(model=model["name"] if isinstance(model, dict) else str(model), messages=messages):
+                    chunks.append(chunk)
+                text = "".join(chunks) or "(no output)"
+                
+                # Log the AI request with usage info
+                last_usage = getattr(provider, "get_last_usage", lambda: None)()
+                model_name = model["name"] if isinstance(model, dict) else str(model)
+                tokens_used = last_usage.get('total_tokens', 0) if last_usage else 0
+                await log_ai_request(guild, message.author, message.channel, provider_name, model_name, tokens_used)
+                
+                # Update usage statistics
+                if last_usage:
+                    async with s.config.guild(guild).usage as usage:
+                        t = usage.setdefault("tokens", {"prompt": 0, "completion": 0, "total": 0})
+                        t["prompt"] = int(t.get("prompt", 0)) + int(last_usage.get("prompt", 0))
+                        t["completion"] = int(t.get("completion", 0)) + int(last_usage.get("completion", 0))
+                        t["total"] = int(t.get("total", 0)) + int(last_usage.get("total", 0))
+                        pu = usage.setdefault("per_user", {})
+                        pc = usage.setdefault("per_channel", {})
+                        u = pu.setdefault(str(message.author.id), {"last_used": int(time.time()), "count_1m": 1, "window_start": int(time.time()), "total": 1, "tokens_total": 0})
+                        c = pc.setdefault(str(message.channel.id), {"count_1m": 1, "window_start": int(time.time()), "total": 1, "tokens_total": 0})
+                        u["tokens_total"] = int(u.get("tokens_total", 0)) + int(last_usage.get("total", 0))
+                        c["tokens_total"] = int(c.get("tokens_total", 0)) + int(last_usage.get("total", 0))
+                
+                # Store conversation in memory (always, for all modes)
+                print(f"[SkynetV2 Listener] Storing conversation in memory...")
+                await s._memory_remember(guild, message.channel.id, processed_content or "Hello", text)
+                
+                # Send response using smart message handling
+                print(f"[SkynetV2 Listener] Sending response with smart chunking: {len(text)} characters...")
+                sent_messages = await MessageChunker.send_long_message(message.channel, text, reference=message)
+                print(f"[SkynetV2 Listener] Response sent as {len(sent_messages)} message(s)!")
             
         except Exception as e:
             # Log the exception for debugging instead of silently returning

@@ -443,7 +443,7 @@ async def guild_dashboard(request: web.Request):
             <h2>Quick Actions</h2>
             <button onclick="location.href='/guild/{guild_id_for_js}/config'">⚙️ Full Configuration</button>
             <button onclick="location.href='/guild/{guild_id_for_js}/channels'">📺 Channel Settings</button>
-            <button onclick="location.href='/guild/{guild_id_for_js}/prompts'">💬 Prompt Management</button>
+            <button onclick=\"location.href='/prompts?guild={guild_id_for_js}'\">💬 Prompt Management</button>
             <button onclick=\"location.href='/guild/{guild_id_for_js}/governance'\" class="secondary">🛡️ Governance</button>
             <button onclick="location.href='/test/{guild_id_for_js}'" class="secondary">🧪 Test AI Chat</button>
             <button onclick="location.href='/usage/{guild_id_for_js}'" class="secondary">📊 Usage Statistics</button>
@@ -924,17 +924,8 @@ async def guild_prompts(request: web.Request):
     perms = user.get('permissions', {}) if isinstance(user, dict) else {}
     if str(gid) not in perms.get('guilds', []):
         return web.Response(text='Forbidden', status=403)
-    guild = webiface.cog.bot.get_guild(gid)
-    if not guild:
-        return web.Response(text='Guild not found', status=404)
-    body = f"""
-    <h1>Prompt Management - {guild.name}</h1>
-    <div class='card'>
-        <p>Prompt management UI is coming soon.</p>
-        <button onclick=\"location.href='/guild/{gid}'\" class='btn-secondary'>← Back</button>
-    </div>
-    """
-    return web.Response(text=_html_base('Prompts', body), content_type='text/html')
+    # Redirect to the unified prompts UI with guild context
+    return web.HTTPFound(f"/prompts?guild={gid}")
 
 async def guild_usage(request: web.Request):
     webiface = request.app['webiface']

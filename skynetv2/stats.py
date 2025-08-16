@@ -3,18 +3,7 @@ from __future__ import annotations
 from typing import Dict, Any, Optional
 import time
 import discord
-try:
-    from .governance import check_over_budget  # Prefer package-relative
-except Exception:
-    import importlib
-    try:
-        # Package-aware import for loaders that don't set __package__ properly
-        _gov = importlib.import_module(".governance", package=__package__ or "skynetv2")
-        check_over_budget = getattr(_gov, "check_over_budget")
-    except Exception as e:
-        raise ModuleNotFoundError(
-            "Unable to import governance.check_over_budget via package-aware relative import"
-        ) from e
+from .governance import check_over_budget
 
 class StatsMixin:
     """Stats and usage text builder."""

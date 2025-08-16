@@ -3,17 +3,83 @@ from __future__ import annotations
 from typing import Dict, Any, Optional
 import time
 import discord
-from .governance import check_over_budget
+import importlib
+import importlib.util
+import sys
+import os
+
+# Lazy-resolved governance import to avoid loader/package context issues during cog load
+_CHECK_OVER_BUDGET = None  # type: ignore[var-annotated]
+
+
+def _resolve_check_over_budget():
+    """
+    Resolve governance.check_over_budget in a loader-agnostic way.
+
+    Tries in order:
+      1) Package-relative import (preferred when __package__ is set)
+      2) Absolute import (skynetv2.governance)
+      3) File-path import from this directory as a last resort
+    """
+    global _CHECK_OVER_BUDGET
+    if _CHECK_OVER_BUDGET is not None:
+        return _CHECK_OVER_BUDGET
+
+    # 1) Package-relative (preferred)
+    try:
+        if __package__:
+            from .governance import check_over_budget as cob  # type: ignore[reportRelativeImport]
+            _CHECK_OVER_BUDGET = cob
+            return _CHECK_OVER_BUDGET
+    except Exception:
+        pass
+
+    # 2) Absolute import
+    try:
+        from skynetv2.governance import check_over_budget as cob  # type: ignore[reportMissingImports]
+        _CHECK_OVER_BUDGET = cob
+        return _CHECK_OVER_BUDGET
+    except Exception:
+        pass
+
+    # 3) File-path import from this folder (loader fallback)
+    try:
+        base_dir = os.path.dirname(__file__)
+        gov_path = os.path.join(base_dir, "governance.py")
+        spec = importlib.util.spec_from_file_location("skynetv2_governance_stats", gov_path)
+        if spec and spec.loader:
+            mod = importlib.util.module_from_spec(spec)
+            sys.modules.setdefault("skynetv2_governance_stats", mod)
+            spec.loader.exec_module(mod)  # type: ignore[attr-defined]
+            cob = getattr(mod, "check_over_budget")
+            _CHECK_OVER_BUDGET = cob
+            return _CHECK_OVER_BUDGET
+    except Exception:
+        pass
+
+    raise ModuleNotFoundError("Unable to resolve governance.check_over_budget")
+
 
 class StatsMixin:
     """Stats and usage text builder."""
 
     def _human_delta(self, seconds: int) -> str:
         return (
-            f"{seconds}s" if seconds < 60 else f"{seconds // 60}m" if seconds < 3600 else f"{seconds // 3600}h" if seconds < 86400 else f"{seconds // 86400}d"
+            f"{seconds}s"
+            if seconds < 60
+            else f"{seconds // 60}m"
+            if seconds < 3600
+            else f"{seconds // 3600}h"
+            if seconds < 86400
+            else f"{seconds // 86400}d"
         )
 
-    async def _check_and_record_usage(self, guild: discord.Guild, channel: discord.abc.GuildChannel, user: discord.User) -> Optional[str]:
+    async def _check_and_record_usage(
+        self,
+        guild: discord.Guild,
+        channel: discord.abc.GuildChannel,
+        user: discord.User,
+    ) -> Optional[str]:
         now = int(time.time())
         rl = await self.config.guild(guild).rate_limits()
         cooldown = int(rl.get("cooldown_sec", 10))
@@ -21,6 +87,7 @@ class StatsMixin:
         per_channel_per_min = int(rl.get("per_channel_per_min", 20))
 
         # Governance: hard reject when over budget (tokens or USD per effective unit)
+        check_over_budget = _resolve_check_over_budget()
         budget_err = await check_over_budget(self, guild)
         if budget_err:
             return budget_err
@@ -29,8 +96,25 @@ class StatsMixin:
         async with self.config.guild(guild).usage() as usage:
             pu = usage.setdefault("per_user", {})
             pc = usage.setdefault("per_channel", {})
-            u = pu.setdefault(str(user.id), {"last_used": 0, "count_1m": 0, "window_start": now, "total": 0, "tokens_total": 0})
-            c = pc.setdefault(str(channel.id), {"count_1m": 0, "window_start": now, "total": 0, "tokens_total": 0})
+            u = pu.setdefault(
+                str(user.id),
+                {
+                    "last_used": 0,
+                    "count_1m": 0,
+                    "window_start": now,
+                    "total": 0,
+                    "tokens_total": 0,
+                },
+            )
+            c = pc.setdefault(
+                str(channel.id),
+                {
+                    "count_1m": 0,
+                    "window_start": now,
+                    "total": 0,
+                    "tokens_total": 0,
+                },
+            )
 
             if now - int(u.get("window_start", now)) >= 60:
                 u["window_start"], u["count_1m"] = now, 0
@@ -78,7 +162,7 @@ class StatsMixin:
             f"Rate: cooldown={cooldown}s, per-user/min={pum}, per-channel/min={pcm}, tools-user/min={tpu}, tools-guild/min={tpg}",
             f"Tools: total={tools_total}, distinct={len(tools_map)}",
         ]
-        
+
         # Enhanced autosearch mode distribution
         if autosearch:
             executed = autosearch.get("executed", {})
@@ -87,7 +171,7 @@ class StatsMixin:
             scrape_count = int(executed.get("scrape", 0))
             crawl_count = int(executed.get("crawl", 0))
             deep_count = int(executed.get("deep_research", 0))
-            
+
             lines.append(f"Autosearch: {classified_total} classified")
             if classified_total > 0:
                 distribution = []
@@ -99,14 +183,18 @@ class StatsMixin:
                     distribution.append(f"crawl:{crawl_count}")
                 if deep_count > 0:
                     distribution.append(f"deep:{deep_count}")
-                
+
                 if distribution:
                     lines.append(f"Executed: {', '.join(distribution)}")
                 else:
                     lines.append("Executed: (none)")
-        
+
         if tools_map:
-            top_tools = sorted(tools_map.items(), key=lambda kv: int(kv[1].get("count", 0)), reverse=True)[:top_n]
+            top_tools = sorted(
+                tools_map.items(),
+                key=lambda kv: int(kv[1].get("count", 0)),
+                reverse=True,
+            )[: top_n]
             if top_tools:
                 lines.append("Top tools:")
                 for name, data in top_tools:
@@ -114,17 +202,17 @@ class StatsMixin:
                     success_count = int(data.get("success_count", 0))
                     error_count = int(data.get("error_count", 0))
                     latency = data.get("latency_ms", {})
-                    
+
                     # Calculate success rate
                     total_attempts = success_count + error_count
                     success_rate = (success_count / total_attempts * 100) if total_attempts > 0 else 0
-                    
+
                     # Calculate average latency
                     avg_latency = 0
                     last_latency = int(latency.get("last", 0))
                     if latency.get("count", 0) > 0:
                         avg_latency = int(latency.get("total", 0)) / int(latency.get("count", 1))
-                    
+
                     line_parts = [f"- {name}: {count}"]
                     if total_attempts > 0:
                         line_parts.append(f"({success_rate:.0f}% ok)")
@@ -132,9 +220,9 @@ class StatsMixin:
                         line_parts.append(f"avg:{avg_latency:.0f}ms")
                     if last_latency > 0:
                         line_parts.append(f"last:{last_latency}ms")
-                    
+
                     lines.append(" ".join(line_parts))
-        
+
         # Display per-tool cooldowns if any are active
         rl = await self.config.guild(guild).rate_limits()
         tool_cooldowns: Dict[str, int] = rl.get("tool_cooldowns", {}) or {}
@@ -152,15 +240,15 @@ class StatsMixin:
                         if last_used > 0:
                             remaining = max(0, cooldown_sec - (now - last_used))
                             max_remaining = max(max_remaining, remaining)
-                    
-                    status = f"ready" if max_remaining == 0 else f"{max_remaining}s"
+
+                    status = "ready" if max_remaining == 0 else f"{max_remaining}s"
                     active_cooldowns.append(f"- {tool_name}: {cooldown_sec}s ({status})")
-            
+
             if active_cooldowns:
                 lines.extend(active_cooldowns[:10])  # Limit to top 10 to avoid spam
             else:
                 lines.append("- (all tools ready)")
-        
+
         # Enhanced autosearch mode distribution
         if autosearch:
             executed = autosearch.get("executed", {})
@@ -169,7 +257,7 @@ class StatsMixin:
             scrape_count = int(executed.get("scrape", 0))
             crawl_count = int(executed.get("crawl", 0))
             deep_count = int(executed.get("deep_research", 0))
-            
+
             lines.append(f"Autosearch: {classified_total} classified")
             if classified_total > 0:
                 distribution = []
@@ -181,29 +269,37 @@ class StatsMixin:
                     distribution.append(f"crawl:{crawl_count}")
                 if deep_count > 0:
                     distribution.append(f"deep:{deep_count}")
-                
+
                 if distribution:
                     lines.append(f"Executed: {', '.join(distribution)}")
                 else:
                     lines.append("Executed: (none)")
-        
+
         pu: Dict[str, Dict[str, Any]] = usage.get("per_user", {})
         if pu:
-            top_users = sorted(pu.items(), key=lambda kv: int(kv[1].get("tokens_total", 0)), reverse=True)[:top_n]
+            top_users = sorted(
+                pu.items(), key=lambda kv: int(kv[1].get("tokens_total", 0)), reverse=True
+            )[: top_n]
             if top_users:
                 lines.append("Top users (tokens):")
                 for uid, stats in top_users:
                     member = guild.get_member(int(uid))
                     name = member.display_name if member else uid
-                    lines.append(f"- {name}: tokens={int(stats.get('tokens_total', 0))}, req={int(stats.get('total', 0))}")
+                    lines.append(
+                        f"- {name}: tokens={int(stats.get('tokens_total', 0))}, req={int(stats.get('total', 0))}"
+                    )
         pc: Dict[str, Dict[str, Any]] = usage.get("per_channel", {})
         if pc:
-            top_channels = sorted(pc.items(), key=lambda kv: int(kv[1].get("tokens_total", 0)), reverse=True)[:top_n]
+            top_channels = sorted(
+                pc.items(), key=lambda kv: int(kv[1].get("tokens_total", 0)), reverse=True
+            )[: top_n]
             if top_channels:
                 lines.append("Top channels (tokens):")
                 for cid, stats in top_channels:
                     chan = guild.get_channel(int(cid))
                     name = f"#{chan.name}" if isinstance(chan, discord.TextChannel) else cid
-                    lines.append(f"- {name}: tokens={int(stats.get('tokens_total', 0))}, req={int(stats.get('total', 0))}")
+                    lines.append(
+                        f"- {name}: tokens={int(stats.get('tokens_total', 0))}, req={int(stats.get('total', 0))}"
+                    )
         out = "\n".join(lines)
         return out[:1900]

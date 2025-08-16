@@ -63,6 +63,7 @@ Safety caps (depth, result limits, total characters) prevent runaway usage. Futu
 - [Commands](docs/commands.md)
 - [Configuration](docs/configuration.md)
 - [Architecture](docs/architecture.md)
+- [Governance & Model Policy](docs/governance.md)
 - [Web Interface Setup](docs/web-oauth-setup.md)
 
 ## Support

@@ -1,0 +1,12 @@
+[flake8]
+exclude = .venv,build,dist,__pycache__,.git
+max-line-length = 120
+extend-ignore =
+    E203,
+    W503,
+    E501
+per-file-ignores =
+    tests/*: E302,E305,E402,W291,W292,W293,E501,F401
+    skynetv2/webapp/pages.py: E302,E305,E501,E701,W292,W293
+    skynetv2/webapp/prompts.py: E302,E305,E401,E501,E701,E702,E225,E231,W291,W292,W293,F541,F841
+    test_variable_fix.py: E302,E305,W291,W292,W293,E501,F401

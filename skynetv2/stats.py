@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Dict, Any, Optional
 import time
 import discord
+from .governance import check_over_budget
 
 class StatsMixin:
     """Stats and usage text builder."""
@@ -18,6 +19,11 @@ class StatsMixin:
         cooldown = int(rl.get("cooldown_sec", 10))
         per_user_per_min = int(rl.get("per_user_per_min", 6))
         per_channel_per_min = int(rl.get("per_channel_per_min", 20))
+
+        # Governance: hard reject when over budget (tokens or USD per effective unit)
+        budget_err = await check_over_budget(self, guild)
+        if budget_err:
+            return budget_err
 
         is_owner = await self.bot.is_owner(user)
         async with self.config.guild(guild).usage() as usage:

@@ -35,6 +35,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Web interface session management and permission checking
 - Configuration persistence for complex provider setups
 
+## [1.6.0] - 2025-08-16
+
+### Added
+- Governance budgets with daily caps in tokens and USD; enforcement with hard-reject when exceeded (see [skynetv2/governance.py](skynetv2/governance.py:292))
+- Budget accounting and snapshot helpers (effective budget/policy merge, daily reset, consumption): [python.get_effective_budget()](skynetv2/governance.py:60), [python.get_effective_model_policy()](skynetv2/governance.py:22), [python.reset_if_needed()](skynetv2/governance.py:143), [python.get_consumption()](skynetv2/governance.py:186)
+- Admin commands to manage policy and budgets:
+  - Prefix: `[p]ai modelpolicy ...`, `[p]ai budget ...` in [skynetv2/skynetv2.py](skynetv2/skynetv2.py:1015)
+  - Slash: `/skynet modelpolicy ...`, `/skynet budget ...` in [skynetv2/skynetv2.py](skynetv2/skynetv2.py:809)
+- Threshold notifications (80%/95%) with owner DM and optional admin channel post: [python._notify_budget_threshold()](skynetv2/skynetv2.py:224), invoked in chat flows at [skynetv2/skynetv2.py](skynetv2/skynetv2.py:444), [skynetv2/skynetv2.py](skynetv2/skynetv2.py:582), [skynetv2/skynetv2.py](skynetv2/skynetv2.py:1282)
+- Governance documentation: [docs/governance.md](docs/governance.md:1)
+- Tests: [tests/test_governance.py](tests/test_governance.py:1) (policy merge, budget consumption, thresholds, reset, snapshot)
+
+### Changed
+- Cost recording now contributes USD deltas to governance usage in [python.SkynetV2._estimate_and_record_cost()](skynetv2/skynetv2.py:172)
+- README updated to include Governance & Model Policy docs link: [README.md](README.md:61)
+
+### Fixed
+- Import-time stability for tests without discord/redbot installed:
+  - Lazy import in [skynetv2/__init__.py](skynetv2/__init__.py:1)
+  - Optional `discord` import guard in [skynetv2/memory.py](skynetv2/memory.py:3)
 ## [1.5.0] - 2025-08-08
 
 ### Added

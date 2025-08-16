@@ -48,7 +48,8 @@ After finishing each top-level task (or meaningful subtask), run a vibe_check to
 
 ## 5. Governance Additions
 
-- [ ] Daily/weekly cost budget caps (abort calls if exceeding). Config + docs.
+- [x] Daily cost and token budget caps (abort calls if exceeding). Config + docs.
+- [ ] Weekly cost budget caps (abort calls if exceeding). Config + docs.
 - [x] Tool allow/deny lists per role/channel. ✅ DONE - added `allow_roles`, `deny_roles`, `allow_channels`, `deny_channels`
 - [x] Per-tool per-user minute cap (override of global tool window). ✅ DONE - `governance.tools.per_user_minute_overrides`
 - [x] Cooldown override permission (e.g., roles bypass?). ✅ DONE - `governance.bypass.cooldown_roles`
@@ -110,12 +111,12 @@ After finishing each top-level task (or meaningful subtask), run a vibe_check to
 
 ## 13. Model Policy & Provider UX
 
-- [ ] Add commands: `[p]ai modelpolicy allow add/remove <provider> <model>` (guild + global variants).
-- [ ] Add commands: `[p]ai modelpolicy deny add/remove <provider> <model>`.
-- [ ] Slash equivalents under `/skynet modelpolicy ...`.
+- [x] Add commands: `[p]ai modelpolicy allow add/remove <provider> <model>` (guild + global variants).
+- [x] Add commands: `[p]ai modelpolicy deny add/remove <provider> <model>`.
+- [x] Slash equivalents under `/skynet modelpolicy ...`.
 - [ ] Command to list resolved model policy (allow, deny, effective) with cache hit stats.
 - [ ] Command to clear model list cache (`model cache flush`).
-- [ ] Docs section (configuration + commands) for model policies.
+- [x] Docs section (configuration + commands) for model policies.
 - [ ] Telemetry: count policy denials.
 - [ ] vibe_check
 

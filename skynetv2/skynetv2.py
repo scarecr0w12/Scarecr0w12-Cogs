@@ -24,6 +24,7 @@ from .orchestration import OrchestrationMixin
 from .logging_system import log_config_change, log_error_event, log_ai_request
 from .error_handler import ErrorHandler
 from .web.server import WebServer  # modular web server
+from .governance import record_budget_usage, check_over_budget, reset_if_needed, get_effective_budget
 
 
 class SkynetV2(ToolsMixin, MemoryMixin, StatsMixin, ListenerMixin, OrchestrationMixin, commands.Cog):
@@ -32,6 +33,9 @@ class SkynetV2(ToolsMixin, MemoryMixin, StatsMixin, ListenerMixin, Orchestration
     # Slash command groups (class-level) — keep /skynet, add /ai for compatibility
     ai_slash = app_commands.Group(name="skynet", description="AI assistant commands")
     mem_group = app_commands.Group(name="memory", description="Memory controls", parent=ai_slash)
+    # Governance/model policy & budget management via slash
+    modelpolicy_slash = app_commands.Group(name="modelpolicy", description="Model policy controls", parent=ai_slash)
+    budget_slash = app_commands.Group(name="budget", description="Budget controls", parent=ai_slash)
     ai_compat = app_commands.Group(name="ai", description="AI assistant commands (compat)")
     ai_mem_compat = app_commands.Group(name="memory", description="Memory controls", parent=ai_compat)
 
@@ -176,6 +180,11 @@ class SkynetV2(ToolsMixin, MemoryMixin, StatsMixin, ListenerMixin, Orchestration
             async with self.config.guild(guild).usage() as usage:
                 c = usage.setdefault("cost", {"usd": 0.0})
                 c["usd"] = float(c.get("usd", 0.0)) + float(delta)
+            # Governance: record USD delta for budget tracking (tokens recorded elsewhere)
+            try:
+                await record_budget_usage(self, guild, tokens_delta=0, usd_delta=float(delta))
+            except Exception:
+                pass
 
     async def _models_cached(self, provider_name: str, provider_config: Dict[str, Any]) -> List[str]:
         # Create cache key from provider config
@@ -208,6 +217,53 @@ class SkynetV2(ToolsMixin, MemoryMixin, StatsMixin, ListenerMixin, Orchestration
     # ----------------
     # Autocomplete helpers
     # ----------------
+
+    # ----------------
+    # Budget notifications helper
+    # ----------------
+    async def _notify_budget_threshold(self, guild: discord.Guild, status: Dict[str, Any]) -> None:
+        try:
+            warn = status.get("warn_level")
+            if not warn:
+                return
+            eff = await get_effective_budget(self, guild)
+            unit = eff.get("unit", "tokens")
+            limit_tokens = int(status.get("limit_tokens", 0) or 0)
+            limit_usd = float(status.get("limit_usd", 0.0) or 0.0)
+            ratio_tok = float(status.get("ratio_tokens", 0.0) or 0.0)
+            ratio_usd = float(status.get("ratio_usd", 0.0) or 0.0)
+
+            lines = [
+                f"⚠️ Budget warning ({warn}) for guild {guild.id}",
+                f"Unit: {unit}",
+                f"Usage ratios: tokens={ratio_tok:.2f}, usd={ratio_usd:.2f}",
+                f"Limits: tokens={limit_tokens}, usd=${limit_usd:.2f}"
+            ]
+            message = "\n".join(lines)
+
+            # Notify guild owner via DM if available
+            owner = getattr(guild, "owner", None)
+            if not owner and hasattr(guild, "owner_id"):
+                owner = guild.get_member(int(guild.owner_id))
+            if owner:
+                try:
+                    await owner.send(message)
+                except Exception:
+                    pass
+
+            # Notify configured admin channel if set
+            gov = await self.config.guild(guild).governance()
+            admin_channel_id = (((gov or {}).get("budget", {}) or {}).get("per_guild", {}) or {}).get("admin_channel_id")
+            if admin_channel_id:
+                chan = guild.get_channel(int(admin_channel_id))
+                if chan and hasattr(chan, "send"):
+                    try:
+                        await chan.send(message)
+                    except Exception:
+                        pass
+        except Exception:
+            # Do not fail the command if notifications fail
+            pass
 
     async def _ac_provider(self, interaction: discord.Interaction, current: str):
         providers = ["openai"]
@@ -385,6 +441,11 @@ class SkynetV2(ToolsMixin, MemoryMixin, StatsMixin, ListenerMixin, Orchestration
                     if epoch_now - int(u.get("tokens_day_start", epoch_now)) >= 86400:
                         u["tokens_day_start"], u["tokens_day_total"] = epoch_now, 0
                     u["tokens_day_total"] = int(u.get("tokens_day_total", 0)) + int(last_usage.get("total", 0))
+                # Governance: record token usage for budget tracking
+                try:
+                    await record_budget_usage(self, ctx.guild, tokens_delta=int(last_usage.get("total", 0) or 0), usd_delta=0.0)
+                except Exception:
+                    pass
             await self._memory_remember(ctx.guild, ctx.channel.id, message, text, user=ctx.author)
         await ctx.send(text[:2000])
 
@@ -518,8 +579,13 @@ class SkynetV2(ToolsMixin, MemoryMixin, StatsMixin, ListenerMixin, Orchestration
                 if epoch_now - int(u.get("tokens_day_start", epoch_now)) >= 86400:
                     u["tokens_day_start"], u["tokens_day_total"] = epoch_now, 0
                 u["tokens_day_total"] = int(u.get("tokens_day_total", 0)) + int(last_usage.get("total", 0))
+            # Governance: record token usage
+            try:
+                await record_budget_usage(self, ctx.guild, tokens_delta=int(last_usage.get("total", 0) or 0), usd_delta=0.0)
+            except Exception:
+                pass
             await self._estimate_and_record_cost(ctx.guild, provider_name, model_name, int(last_usage.get("prompt", 0)), int(last_usage.get("completion", 0)))
-        await self._memory_remember(ctx.guild, ctx.channel.id, resolved_message, buf, user=ctx.author)
+            await self._memory_remember(ctx.guild, ctx.channel.id, resolved_message, buf, user=ctx.author)
 
     @ai_group.command(name="websearch")
     async def ai_websearch(self, ctx: commands.Context, *, query: str):
@@ -738,6 +804,108 @@ class SkynetV2(ToolsMixin, MemoryMixin, StatsMixin, ListenerMixin, Orchestration
         await ctx.tick()
 
     # ----------------
+    # Slash: Model Policy (/skynet modelpolicy ...)
+    # ----------------
+    @modelpolicy_slash.command(name="show", description="Show current model policy")
+    @app_commands.default_permissions(manage_guild=True)
+    async def slash_modelpolicy_show(self, interaction: discord.Interaction):
+        assert interaction.guild is not None
+        pol = await self.config.guild(interaction.guild).policy()
+        await interaction.response.send_message(box(json.dumps(pol or {}, indent=2), "json"), ephemeral=True)
+
+    @modelpolicy_slash.command(name="allow_add", description="Allow model for provider")
+    @app_commands.describe(provider="Provider name", model="Model name")
+    @app_commands.default_permissions(manage_guild=True)
+    async def slash_modelpolicy_allow_add(self, interaction: discord.Interaction, provider: str, model: str):
+        assert interaction.guild is not None
+        async with self.config.guild(interaction.guild).policy() as pol:
+            m = pol.setdefault("models", {})
+            a = m.setdefault("allow", {})
+            a.setdefault(provider, [])
+            if model not in a[provider]:
+                a[provider].append(model)
+        await interaction.response.send_message("✅ Added to allow list.", ephemeral=True)
+
+    @modelpolicy_slash.command(name="allow_remove", description="Remove model from allow list")
+    @app_commands.describe(provider="Provider name", model="Model name")
+    @app_commands.default_permissions(manage_guild=True)
+    async def slash_modelpolicy_allow_remove(self, interaction: discord.Interaction, provider: str, model: str):
+        assert interaction.guild is not None
+        async with self.config.guild(interaction.guild).policy() as pol:
+            try:
+                pol.setdefault("models", {}).setdefault("allow", {}).setdefault(provider, []).remove(model)
+            except ValueError:
+                pass
+        await interaction.response.send_message("✅ Removed from allow list.", ephemeral=True)
+
+    @modelpolicy_slash.command(name="deny_add", description="Deny model for provider")
+    @app_commands.describe(provider="Provider name", model="Model name")
+    @app_commands.default_permissions(manage_guild=True)
+    async def slash_modelpolicy_deny_add(self, interaction: discord.Interaction, provider: str, model: str):
+        assert interaction.guild is not None
+        async with self.config.guild(interaction.guild).policy() as pol:
+            m = pol.setdefault("models", {})
+            d = m.setdefault("deny", {})
+            d.setdefault(provider, [])
+            if model not in d[provider]:
+                d[provider].append(model)
+        await interaction.response.send_message("✅ Added to deny list.", ephemeral=True)
+
+    @modelpolicy_slash.command(name="deny_remove", description="Remove model from deny list")
+    @app_commands.describe(provider="Provider name", model="Model name")
+    @app_commands.default_permissions(manage_guild=True)
+    async def slash_modelpolicy_deny_remove(self, interaction: discord.Interaction, provider: str, model: str):
+        assert interaction.guild is not None
+        async with self.config.guild(interaction.guild).policy() as pol:
+            try:
+                pol.setdefault("models", {}).setdefault("deny", {}).setdefault(provider, []).remove(model)
+            except ValueError:
+                pass
+        await interaction.response.send_message("✅ Removed from deny list.", ephemeral=True)
+
+    # ----------------
+    # Slash: Budget (/skynet budget ...)
+    # ----------------
+    @budget_slash.command(name="show", description="Show per-guild budget settings")
+    @app_commands.default_permissions(manage_guild=True)
+    async def slash_budget_show(self, interaction: discord.Interaction):
+        assert interaction.guild is not None
+        gov = await self.config.guild(interaction.guild).governance()
+        per = ((gov or {}).get("budget", {}) or {}).get("per_guild", {}) if gov else {}
+        await interaction.response.send_message(box(json.dumps(per or {}, indent=2), "json"), ephemeral=True)
+
+    @budget_slash.command(name="set", description="Set budget amount with unit")
+    @app_commands.describe(amount="Amount for the chosen unit", unit="usd or tokens")
+    @app_commands.choices(unit=[app_commands.Choice(name="tokens", value="tokens"), app_commands.Choice(name="usd", value="usd")])
+    @app_commands.default_permissions(manage_guild=True)
+    async def slash_budget_set(self, interaction: discord.Interaction, amount: float, unit: app_commands.Choice[str]):
+        assert interaction.guild is not None
+        u = (unit.value if hasattr(unit, "value") else str(unit)).lower()
+        async with self.config.guild(interaction.guild).governance() as gov:
+            b = gov.setdefault("budget", {})
+            pg = b.setdefault("per_guild", {})
+            pg["unit"] = u
+            if u == "tokens":
+                pg["daily_tokens"] = max(0, int(amount))
+            else:
+                pg["daily_usd"] = max(0.0, float(amount))
+        await interaction.response.send_message("✅ Budget updated.", ephemeral=True)
+
+    @budget_slash.command(name="reset", description="Reset daily budget counters now")
+    @app_commands.default_permissions(manage_guild=True)
+    async def slash_budget_reset(self, interaction: discord.Interaction):
+        assert interaction.guild is not None
+        now = int(time.time())
+        async with self.config.guild(interaction.guild).usage() as usage:
+            b = usage.setdefault("budget", {})
+            b["tokens_day_start"] = now
+            b["tokens_day_total"] = 0
+            b["cost_day_start"] = now
+            b["cost_day_usd"] = 0.0
+            b["last_warn_level"] = None
+        await interaction.response.send_message("✅ Budget counters reset.", ephemeral=True)
+
+    # ----------------
     # Governance commands (prefix)
     # ----------------
 
@@ -839,6 +1007,122 @@ class SkynetV2(ToolsMixin, MemoryMixin, StatsMixin, ListenerMixin, Orchestration
     @ai_governance_budget.command(name="settokens")
     async def ai_governance_budget_settokens(self, ctx: commands.Context, per_user_daily_tokens: int):
         await self._gov_update(ctx.guild, lambda g: g.setdefault("budget", {}).update({"per_user_daily_tokens": max(0, int(per_user_daily_tokens))}))
+        await ctx.tick()
+
+    # ----------------
+    # Prefix: Model Policy (guild)
+    # ----------------
+    @ai_group.group(name="modelpolicy")
+    @checks.admin_or_permissions(manage_guild=True)
+    async def ai_modelpolicy(self, ctx: commands.Context):
+        """Model policy controls (allow/deny lists per provider)."""
+        if ctx.invoked_subcommand is None:
+            await ctx.send_help()
+
+    @ai_modelpolicy.command(name="show")
+    async def ai_modelpolicy_show(self, ctx: commands.Context):
+        pol = await self.config.guild(ctx.guild).policy()
+        models = (pol or {}).get("models", {}) if pol else {}
+        allow = models.get("allow", {})
+        deny = models.get("deny", {})
+        lines = ["allow:"]
+        for p, lst in (allow or {}).items():
+            lines.append(f"  {p}: {', '.join(lst) if lst else '(none)'}")
+        lines.append("deny:")
+        for p, lst in (deny or {}).items():
+            lines.append(f"  {p}: {', '.join(lst) if lst else '(none)'}")
+        await ctx.send(box("\n".join(lines), "yaml"))
+
+    @ai_modelpolicy.group(name="allow")
+    async def ai_modelpolicy_allow(self, ctx: commands.Context):
+        if ctx.invoked_subcommand is None:
+            await ctx.send_help()
+
+    @ai_modelpolicy_allow.command(name="add")
+    async def ai_modelpolicy_allow_add(self, ctx: commands.Context, provider: str, model: str):
+        async with self.config.guild(ctx.guild).policy() as pol:
+            m = pol.setdefault("models", {})
+            a = m.setdefault("allow", {})
+            a.setdefault(provider, [])
+            if model not in a[provider]:
+                a[provider].append(model)
+        await ctx.tick()
+
+    @ai_modelpolicy_allow.command(name="remove")
+    async def ai_modelpolicy_allow_remove(self, ctx: commands.Context, provider: str, model: str):
+        async with self.config.guild(ctx.guild).policy() as pol:
+            try:
+                pol.setdefault("models", {}).setdefault("allow", {}).setdefault(provider, []).remove(model)
+            except ValueError:
+                pass
+        await ctx.tick()
+
+    @ai_modelpolicy.group(name="deny")
+    async def ai_modelpolicy_deny(self, ctx: commands.Context):
+        if ctx.invoked_subcommand is None:
+            await ctx.send_help()
+
+    @ai_modelpolicy_deny.command(name="add")
+    async def ai_modelpolicy_deny_add(self, ctx: commands.Context, provider: str, model: str):
+        async with self.config.guild(ctx.guild).policy() as pol:
+            m = pol.setdefault("models", {})
+            d = m.setdefault("deny", {})
+            d.setdefault(provider, [])
+            if model not in d[provider]:
+                d[provider].append(model)
+        await ctx.tick()
+
+    @ai_modelpolicy_deny.command(name="remove")
+    async def ai_modelpolicy_deny_remove(self, ctx: commands.Context, provider: str, model: str):
+        async with self.config.guild(ctx.guild).policy() as pol:
+            try:
+                pol.setdefault("models", {}).setdefault("deny", {}).setdefault(provider, []).remove(model)
+            except ValueError:
+                pass
+        await ctx.tick()
+
+    # ----------------
+    # Prefix: Budget (per-guild)
+    # ----------------
+    @ai_group.group(name="budget")
+    @checks.admin_or_permissions(manage_guild=True)
+    async def ai_budget(self, ctx: commands.Context):
+        """Budget controls (unit tokens/usd)."""
+        if ctx.invoked_subcommand is None:
+            await ctx.send_help()
+
+    @ai_budget.command(name="show")
+    async def ai_budget_show(self, ctx: commands.Context):
+        gov = await self.config.guild(ctx.guild).governance()
+        per = ((gov or {}).get("budget", {}) or {}).get("per_guild", {}) if gov else {}
+        await ctx.send(box(json.dumps(per or {}, indent=2), "json"))
+
+    @ai_budget.command(name="set")
+    async def ai_budget_set(self, ctx: commands.Context, amount: float, unit: Optional[str] = "tokens"):
+        unit = (unit or "tokens").lower()
+        if unit not in {"tokens", "usd"}:
+            await ctx.send("Unit must be 'tokens' or 'usd'.")
+            return
+        async with self.config.guild(ctx.guild).governance() as gov:
+            b = gov.setdefault("budget", {})
+            pg = b.setdefault("per_guild", {})
+            pg["unit"] = unit
+            if unit == "tokens":
+                pg["daily_tokens"] = max(0, int(amount))
+            else:
+                pg["daily_usd"] = max(0.0, float(amount))
+        await ctx.tick()
+
+    @ai_budget.command(name="reset")
+    async def ai_budget_reset(self, ctx: commands.Context):
+        now = int(time.time())
+        async with self.config.guild(ctx.guild).usage() as usage:
+            b = usage.setdefault("budget", {})
+            b["tokens_day_start"] = now
+            b["tokens_day_total"] = 0
+            b["cost_day_start"] = now
+            b["cost_day_usd"] = 0.0
+            b["last_warn_level"] = None
         await ctx.tick()
 
     # Register chat under both /skynet and /ai
@@ -995,6 +1279,11 @@ class SkynetV2(ToolsMixin, MemoryMixin, StatsMixin, ListenerMixin, Orchestration
                 if epoch_now - int(u.get("tokens_day_start", epoch_now)) >= 86400:
                     u["tokens_day_start"], u["tokens_day_total"] = epoch_now, 0
                 u["tokens_day_total"] = int(u.get("tokens_day_total", 0)) + int(last_usage.get("total", 0))
+            # Governance: record token usage
+            try:
+                await record_budget_usage(self, interaction.guild, tokens_delta=int(last_usage.get("total", 0) or 0), usd_delta=0.0)
+            except Exception:
+                pass
             await self._estimate_and_record_cost(interaction.guild, provider_name, model_name, int(last_usage.get("prompt", 0)), int(last_usage.get("completion", 0)))
         await self._memory_remember(interaction.guild, interaction.channel.id, resolved_message, text, user=interaction.user)
         await interaction.followup.send(text[:2000])

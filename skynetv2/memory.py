@@ -2,7 +2,10 @@ from __future__ import annotations
 
 from typing import List, Dict, Any, cast
 import time
-import discord # pyright: ignore[reportMissingImports]
+try:
+    import discord  # pyright: ignore[reportMissingImports]
+except ImportError:
+    discord = None  # type: ignore
 from .api.base import ChatMessage
 from .markdown_utils import MarkdownTemplateProcessor, DiscordMarkdownFormatter
 

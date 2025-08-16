@@ -152,6 +152,27 @@ You are **SkynetV2** in **technical mode** - a precise, knowledgeable AI assista
 
 Always include **practical examples** and **actionable information**.""",
         },
+        "policy": {
+            "models": {
+                "allow": {},
+                "deny": {}
+            }
+        },
+        "governance_defaults": {
+            "budget": {
+                "unit": "tokens",
+                "daily": { "tokens": 0, "usd": 0.0 },
+                "thresholds": { "warn1": 0.8, "warn2": 0.95 },
+                "reset": { "period": "daily", "time_utc": "00:00" },
+                "notifications": { "admin_channel_id": None, "dm_admins": True }
+            },
+            "policy": {
+                "models": {
+                    "allow": {},
+                    "deny": {}
+                }
+            }
+        }
     }
 
     default_guild = {
@@ -217,7 +238,30 @@ Always include **practical examples** and **actionable information**.""",
             "prune": {"max_items": 400, "max_age_days": 30}
         },
         # Governance: tool allow/deny lists, cooldown bypass roles, simple per-user daily budget caps (0 disables)
-        "governance": {"tools": {"allow": [], "deny": [], "per_user_minute_overrides": {}, "allow_roles": [], "deny_roles": [], "allow_channels": [], "deny_channels": []}, "bypass": {"cooldown_roles": []}, "budget": {"per_user_daily_tokens": 0, "per_user_daily_cost_usd": 0.0}},
+        "governance": {
+            "tools": {
+                "allow": [],
+                "deny": [],
+                "per_user_minute_overrides": {},
+                "allow_roles": [],
+                "deny_roles": [],
+                "allow_channels": [],
+                "deny_channels": []
+            },
+            "bypass": { "cooldown_roles": [] },
+            "budget": {
+                "per_user_daily_tokens": 0,
+                "per_user_daily_cost_usd": 0.0,
+                "per_guild": {
+                    "unit": "tokens",
+                    "daily_tokens": 0,
+                    "daily_usd": 0.0,
+                    "thresholds": { "warn1": 0.8, "warn2": 0.95 },
+                    "reset": { "period": "daily", "time_utc": "00:00" },
+                    "admin_channel_id": None
+                }
+            }
+        },
         "policy": {"models": {"allow": {}, "deny": {}}},
         "search": None,
         # Stretch features: token truncation, cache, experimental features

@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "agentic-tools": {
+      "command": "npx",
+      "args": ["-y", "@pimzino/agentic-tools-mcp"]
+    }
+  }
+}

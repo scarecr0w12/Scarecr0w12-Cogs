@@ -1126,10 +1126,7 @@ class SkynetV2(ToolsMixin, MemoryMixin, StatsMixin, ListenerMixin, Orchestration
         await ctx.tick()
 
     # Register chat under both /skynet and /ai
-    @ai_slash.command(name="chat", description="Chat once with the configured model")
-    @ai_compat.command(name="chat", description="Chat once with the configured model")
-    @app_commands.describe(message="Your message to the assistant", stream="Stream partial output (edits message)")
-    async def slash_chat(self, interaction: discord.Interaction, message: str, stream: Optional[bool] = False):
+    async def _slash_chat_impl(self, interaction: discord.Interaction, message: str, stream: Optional[bool] = False):
         assert interaction.guild is not None
         err = await self._check_and_record_usage(interaction.guild, interaction.channel, interaction.user)
         if err:
@@ -1152,72 +1149,80 @@ class SkynetV2(ToolsMixin, MemoryMixin, StatsMixin, ListenerMixin, Orchestration
             await interaction.response.send_message(policy_err, ephemeral=True)
             return
         base = await self._memory_build_context(interaction.guild, interaction.channel.id, interaction.user)
-        
+
         # Initialize auto web search system
         from .auto_web_search import AutoWebSearchIntegration, AutoSearchCooldownManager
-        if not hasattr(self, '_auto_search_integration'):
+        if not hasattr(self, "_auto_search_integration"):
             self._auto_search_integration = AutoWebSearchIntegration(self)
-        if not hasattr(self, '_auto_search_cooldowns'):
+        if not hasattr(self, "_auto_search_cooldowns"):
             self._auto_search_cooldowns = AutoSearchCooldownManager()
-        
+
         # Resolve variables in the message
-        resolved_message = await self.resolve_prompt_variables(message, interaction.guild, interaction.channel, interaction.user)
-        
+        resolved_message = await self.resolve_prompt_variables(
+            message, interaction.guild, interaction.channel, interaction.user
+        )
+
         # Auto web search integration - check if we should search for current info
         auto_search_config = await self.config.guild(interaction.guild).auto_web_search()
         search_context = ""
-        
-        if auto_search_config.get('enabled', False):
+
+        if auto_search_config.get("enabled", False):
             # Check if command is allowed for auto search (slash commands count as "chat")
-            if "chat" in auto_search_config.get('allowed_commands', ['chat', 'chatstream']):
+            if "chat" in auto_search_config.get("allowed_commands", ["chat", "chatstream"]):
                 # Check user cooldown
                 user_id = str(interaction.user.id)
-                cooldown_seconds = auto_search_config.get('cooldown_seconds', 60)
-                
+                cooldown_seconds = auto_search_config.get("cooldown_seconds", 60)
+
                 if self._auto_search_cooldowns.can_search(user_id, cooldown_seconds):
                     # Check if message should trigger search
                     should_search, search_reason = self._auto_search_integration.should_trigger_search(
                         resolved_message, auto_search_config
                     )
-                    
+
                     if should_search:
                         # Check message length requirement
-                        min_length = auto_search_config.get('min_message_length', 10)
+                        min_length = auto_search_config.get("min_message_length", 10)
                         if len(resolved_message.strip()) >= min_length:
                             try:
                                 # Perform auto search
                                 search_data = await self._auto_search_integration.perform_auto_search(
                                     resolved_message, interaction.guild, auto_search_config
                                 )
-                                
+
                                 if search_data:
                                     # Format search results as context
                                     search_context = self._auto_search_integration.format_search_context(
                                         search_data, resolved_message
                                     )
-                                    
+
                                     # Record successful search for cooldown
                                     self._auto_search_cooldowns.record_search(user_id)
-                                    
+
                                     # Log auto search activity
-                                    self.logger.info(f"Auto web search triggered for slash chat user {interaction.user.id} in guild {interaction.guild.id}: {search_reason}")
-                                    
+                                    self.logger.info(
+                                        f"Auto web search triggered for slash chat user {interaction.user.id} in guild {interaction.guild.id}: {search_reason}"
+                                    )
+
                             except Exception as e:
                                 # Log error but don't break chat
-                                self.error_handler.log_error(e, "auto_web_search_slash", {
-                                    "user_id": interaction.user.id,
-                                    "guild_id": interaction.guild.id,
-                                    "message_preview": resolved_message[:100]
-                                })
-        
+                                self.error_handler.log_error(
+                                    e,
+                                    "auto_web_search_slash",
+                                    {
+                                        "user_id": interaction.user.id,
+                                        "guild_id": interaction.guild.id,
+                                        "message_preview": resolved_message[:100],
+                                    },
+                                )
+
         # Add search context to the conversation if available
         chat_messages = base.copy()
         if search_context:
             # Insert search context as a system message before the user message
             chat_messages.append(ChatMessage("system", search_context))
-        
+
         chat_messages.append(ChatMessage("user", resolved_message))
-        
+
         if stream:
             await interaction.response.defer(thinking=True)
             msg = await interaction.followup.send("…")
@@ -1251,14 +1256,20 @@ class SkynetV2(ToolsMixin, MemoryMixin, StatsMixin, ListenerMixin, Orchestration
                     t["total"] = int(t.get("total", 0)) + int(last_usage.get("total", 0))
                     pu = usage.setdefault("per_user", {})
                     usage.setdefault("per_channel", {})
-                    u = pu.setdefault(str(interaction.user.id), {"last_used": 0, "count_1m": 0, "window_start": int(time.time()), "total": 0, "tokens_total": 0})
+                    u = pu.setdefault(
+                        str(interaction.user.id),
+                        {"last_used": 0, "count_1m": 0, "window_start": int(time.time()), "total": 0, "tokens_total": 0},
+                    )
                     u["tokens_total"] = int(u.get("tokens_total", 0)) + int(last_usage.get("total", 0))
                     if epoch_now - int(u.get("tokens_day_start", epoch_now)) >= 86400:
                         u["tokens_day_start"], u["tokens_day_total"] = epoch_now, 0
                     u["tokens_day_total"] = int(u.get("tokens_day_total", 0)) + int(last_usage.get("total", 0))
-                await self._estimate_and_record_cost(interaction.guild, provider_name, model_name, int(last_usage.get("prompt", 0)), int(last_usage.get("completion", 0)))
+                await self._estimate_and_record_cost(
+                    interaction.guild, provider_name, model_name, int(last_usage.get("prompt", 0)), int(last_usage.get("completion", 0))
+                )
             await self._memory_remember(interaction.guild, interaction.channel.id, resolved_message, buf, user=interaction.user)
             return
+
         await interaction.response.defer(thinking=True)
         chunks = []
         async for chunk in provider.chat(model=model_name, messages=chat_messages):
@@ -1274,36 +1285,51 @@ class SkynetV2(ToolsMixin, MemoryMixin, StatsMixin, ListenerMixin, Orchestration
                 t["total"] = int(t.get("total", 0)) + int(last_usage.get("total", 0))
                 pu = usage.setdefault("per_user", {})
                 usage.setdefault("per_channel", {})
-                u = pu.setdefault(str(interaction.user.id), {"last_used": 0, "count_1m": 0, "window_start": int(time.time()), "total": 0, "tokens_total": 0})
+                u = pu.setdefault(
+                    str(interaction.user.id), {"last_used": 0, "count_1m": 0, "window_start": int(time.time()), "total": 0, "tokens_total": 0}
+                )
                 u["tokens_total"] = int(u.get("tokens_total", 0)) + int(last_usage.get("total", 0))
                 if epoch_now - int(u.get("tokens_day_start", epoch_now)) >= 86400:
                     u["tokens_day_start"], u["tokens_day_total"] = epoch_now, 0
                 u["tokens_day_total"] = int(u.get("tokens_day_total", 0)) + int(last_usage.get("total", 0))
             # Governance: record token usage
             try:
-                await record_budget_usage(self, interaction.guild, tokens_delta=int(last_usage.get("total", 0) or 0), usd_delta=0.0)
+                await record_budget_usage(
+                    self, interaction.guild, tokens_delta=int(last_usage.get("total", 0) or 0), usd_delta=0.0
+                )
             except Exception:
                 pass
-            await self._estimate_and_record_cost(interaction.guild, provider_name, model_name, int(last_usage.get("prompt", 0)), int(last_usage.get("completion", 0)))
+            await self._estimate_and_record_cost(
+                interaction.guild, provider_name, model_name, int(last_usage.get("prompt", 0)), int(last_usage.get("completion", 0))
+            )
         await self._memory_remember(interaction.guild, interaction.channel.id, resolved_message, text, user=interaction.user)
         await interaction.followup.send(text[:2000])
+
+    @ai_slash.command(name="chat", description="Chat once with the configured model")
+    @app_commands.describe(message="Your message to the assistant", stream="Stream partial output (edits message)")
+    async def slash_chat(self, interaction: discord.Interaction, message: str, stream: Optional[bool] = False):
+        return await self._slash_chat_impl(interaction, message, stream)
+
+    @ai_compat.command(name="chat", description="Chat once with the configured model")
+    @app_commands.describe(message="Your message to the assistant", stream="Stream partial output (edits message)")
+    async def slash_chat_compat(self, interaction: discord.Interaction, message: str, stream: Optional[bool] = False):
+        return await self._slash_chat_impl(interaction, message, stream)
 
     # ----------------
     # Memory scope controls (slash)
     # ----------------
-    @mem_group.command(name="scope", description="Enable/disable per-user memory and set limits")
-    @ai_mem_compat.command(name="scope", description="Enable/disable per-user memory and set limits")
-    @app_commands.describe(per_user_enabled="Enable per-user memory", per_user_limit="Pairs to keep per user per channel", merge_strategy="append, interleave, or user_first")
-    @app_commands.choices(merge_strategy=[
-        app_commands.Choice(name="append", value="append"),
-        app_commands.Choice(name="interleave", value="interleave"),
-        app_commands.Choice(name="user_first", value="user_first"),
-    ])
-    @app_commands.default_permissions(manage_guild=True)
-    async def slash_memory_scope(self, interaction: discord.Interaction, per_user_enabled: Optional[bool] = None, per_user_limit: Optional[int] = None, merge_strategy: Optional[str] = None):
+    async def _slash_memory_scope_impl(
+        self,
+        interaction: discord.Interaction,
+        per_user_enabled: Optional[bool] = None,
+        per_user_limit: Optional[int] = None,
+        merge_strategy: Optional[str] = None,
+    ):
         assert interaction.guild is not None
         async with self.config.guild(interaction.guild).memory() as mem:
-            scopes = mem.setdefault("scopes", {"per_user_enabled": False, "per_user_limit": 10, "merge_strategy": "append"})
+            scopes = mem.setdefault(
+                "scopes", {"per_user_enabled": False, "per_user_limit": 10, "merge_strategy": "append"}
+            )
             if per_user_enabled is not None:
                 scopes["per_user_enabled"] = bool(per_user_enabled)
             if per_user_limit is not None:
@@ -1311,6 +1337,52 @@ class SkynetV2(ToolsMixin, MemoryMixin, StatsMixin, ListenerMixin, Orchestration
             if merge_strategy is not None:
                 scopes["merge_strategy"] = str(merge_strategy)
         await interaction.response.send_message("Memory scope updated.", ephemeral=True)
+
+    @mem_group.command(name="scope", description="Enable/disable per-user memory and set limits")
+    @app_commands.describe(
+        per_user_enabled="Enable per-user memory",
+        per_user_limit="Pairs to keep per user per channel",
+        merge_strategy="append, interleave, or user_first",
+    )
+    @app_commands.choices(
+        merge_strategy=[
+            app_commands.Choice(name="append", value="append"),
+            app_commands.Choice(name="interleave", value="interleave"),
+            app_commands.Choice(name="user_first", value="user_first"),
+        ]
+    )
+    @app_commands.default_permissions(manage_guild=True)
+    async def slash_memory_scope(
+        self,
+        interaction: discord.Interaction,
+        per_user_enabled: Optional[bool] = None,
+        per_user_limit: Optional[int] = None,
+        merge_strategy: Optional[str] = None,
+    ):
+        return await self._slash_memory_scope_impl(interaction, per_user_enabled, per_user_limit, merge_strategy)
+
+    @ai_mem_compat.command(name="scope", description="Enable/disable per-user memory and set limits")
+    @app_commands.describe(
+        per_user_enabled="Enable per-user memory",
+        per_user_limit="Pairs to keep per user per channel",
+        merge_strategy="append, interleave, or user_first",
+    )
+    @app_commands.choices(
+        merge_strategy=[
+            app_commands.Choice(name="append", value="append"),
+            app_commands.Choice(name="interleave", value="interleave"),
+            app_commands.Choice(name="user_first", value="user_first"),
+        ]
+    )
+    @app_commands.default_permissions(manage_guild=True)
+    async def slash_memory_scope_compat(
+        self,
+        interaction: discord.Interaction,
+        per_user_enabled: Optional[bool] = None,
+        per_user_limit: Optional[int] = None,
+        merge_strategy: Optional[str] = None,
+    ):
+        return await self._slash_memory_scope_impl(interaction, per_user_enabled, per_user_limit, merge_strategy)
 
     # ----------------
     # Cog Lifecycle

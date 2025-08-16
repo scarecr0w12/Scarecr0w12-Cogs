@@ -106,11 +106,10 @@ async def get_effective_budget(cog, guild) -> Dict[str, Any]:
 
 
 async def _open_usage_cm(cog, guild):
-    """Return an async context-manager for usage that works with both awaitable and direct CM."""
-    u = cog.config.guild(guild).usage()
-    if inspect.isawaitable(u):
-        u = await u
-    return u
+    """Return an async context-manager for usage."""
+    # Always return the context manager object; callers do:
+    #   usage_cm = await _open_usage_cm(...); async with usage_cm as usage:
+    return cog.config.guild(guild).usage()
 
 async def _get_or_init_budget_usage(cog, guild) -> Dict[str, Any]:
     """
